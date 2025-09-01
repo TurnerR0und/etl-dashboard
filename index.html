@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UK House Price Dashboard</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        /* A simple style for the loader */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #3498db;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">UK House Price Index Dashboard</h1>
+            <p class="text-gray-600 mt-2">Visualizing regional house price trends over time.</p>
+        </header>
+
+        <main>
+            <div class="bg-white p-6 rounded-lg shadow-md max-w-3xl mx-auto">
+                <!-- Control section -->
+                <div class="flex flex-col md:flex-row items-center justify-between mb-6">
+                    <label for="region-select" class="font-semibold text-gray-700 mb-2 md:mb-0">Select a Region:</label>
+                    <select id="region-select" class="w-full md:w-1/2 p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option>Loading regions...</option>
+                    </select>
+                </div>
+
+                <!-- Chart container -->
+                <div id="chart-container" class="relative">
+                    <div id="loader" class="loader absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 hidden"></div>
+                    <div id="message" class="text-center text-gray-500 p-8">Please select a region to view the data.</div>
+                    <canvas id="price-chart" class="hidden"></canvas>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const API_BASE_URL = 'http://127.0.0.1:8000';
+
+        // --- DOM Element References ---
+        const regionSelect = document.getElementById('region-select');
+        const priceChartCanvas = document.getElementById('price-chart');
+        const loader = document.getElementById('loader');
+        const message = document.getElementById('message');
+
+        let priceChart; // This variable will hold our chart instance
+
+        // --- Chart Configuration ---
+        const chartConfig = {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Average Price',
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    data: [], // Data will be populated by the API call
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Price Index',
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    data: [], // Data will be populated by the API call
+                    yAxisID: 'y1'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'year'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Average Price (£)'
+                        },
+                        ticks: {
+                            callback: function(value, index, values) {
+                                return '£' + new Intl.NumberFormat().format(value);
+                            }
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Index'
+                        },
+                        grid: {
+                            drawOnChartArea: false, // only want the grid lines for one axis to show up
+                        },
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                }
+            }
+        };
+
+        // --- Functions ---
+
+        /**
+         * Fetches data from a specified API endpoint.
+         * @param {string} endpoint The API endpoint to fetch (e.g., '/regions').
+         * @returns {Promise<any>} The JSON response data.
+         */
+        async function fetchData(endpoint) {
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`Failed to fetch ${endpoint}:`, error);
+                message.textContent = `Error: Could not load data from the API. Make sure the API server is running.`;
+                message.classList.remove('hidden');
+                loader.classList.add('hidden');
+                priceChartCanvas.classList.add('hidden');
+                return null;
+            }
+        }
+
+        /**
+         * Populates the region select dropdown with data from the API.
+         */
+        async function populateRegions() {
+            const data = await fetchData('/regions');
+            if (data && data.regions) {
+                regionSelect.innerHTML = '<option value="">-- Select a Region --</option>'; // Clear loading message
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region;
+                    option.textContent = region;
+                    regionSelect.appendChild(option);
+                });
+            } else {
+                 regionSelect.innerHTML = '<option>Failed to load regions</option>';
+            }
+        }
+
+        /**
+         * Fetches data for the selected region and updates the chart.
+         * @param {string} regionName The name of the region to fetch data for.
+         */
+        async function updateChart(regionName) {
+            if (!regionName) {
+                 message.textContent = 'Please select a region to view the data.';
+                 message.classList.remove('hidden');
+                 priceChartCanvas.classList.add('hidden');
+                 return;
+            }
+            
+            // Show loader and hide chart/message
+            loader.classList.remove('hidden');
+            priceChartCanvas.classList.add('hidden');
+            message.classList.add('hidden');
+
+            const data = await fetchData(`/data/${encodeURIComponent(regionName)}`);
+
+            loader.classList.add('hidden'); // Hide loader after fetch
+
+            if (data && data.data) {
+                const chartData = {
+                    averagePrice: [],
+                    priceIndex: []
+                };
+
+                data.data.forEach(d => {
+                    // Chart.js expects data in the format {x: timestamp, y: value}
+                    chartData.averagePrice.push({ x: new Date(d.date).getTime(), y: d.average_price });
+                    chartData.priceIndex.push({ x: new Date(d.date).getTime(), y: d.index });
+                });
+                
+                // Update chart data
+                priceChart.data.datasets[0].data = chartData.averagePrice;
+                priceChart.data.datasets[0].label = `Average Price - ${regionName}`;
+                priceChart.data.datasets[1].data = chartData.priceIndex;
+                priceChart.data.datasets[1].label = `Price Index - ${regionName}`;
+                
+                priceChart.update(); // Redraw the chart with new data
+                priceChartCanvas.classList.remove('hidden'); // Show chart
+            } else {
+                message.textContent = `No data available for ${regionName}.`;
+                message.classList.remove('hidden');
+            }
+        }
+        
+        // --- Event Listeners ---
+
+        // Listen for changes on the region select dropdown
+        regionSelect.addEventListener('change', (event) => {
+            updateChart(event.target.value);
+        });
+
+        // --- Initialization ---
+        
+        // This function runs when the page is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            const ctx = priceChartCanvas.getContext('2d');
+            priceChart = new Chart(ctx, chartConfig);
+            populateRegions();
+        });
+
+    </script>
+</body>
+</html>
