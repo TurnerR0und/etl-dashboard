@@ -13,15 +13,10 @@ TABLE_NAME = "uk_hpi_cleaned"
 # --- Database Initialization ---
 def initialize_database():
     """
-    Ensures a fresh database is created on application startup by removing any
-    old database file and re-running the ETL pipeline.
+    Ensures a fresh database is created on application startup by re-running the
+    ETL pipeline. The pipeline is configured to replace existing data.
     """
-    # To ensure a clean slate, remove the old DB if it exists
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-        print(f"Removed existing database '{DB_FILE}' to ensure a fresh start.")
-
-    print("Running ETL pipeline to create a fresh database...")
+    print("Running ETL pipeline to create/update database...")
     try:
         run_pipeline()
         print("ETL pipeline completed successfully.")
