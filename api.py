@@ -6,7 +6,8 @@ from fastapi.responses import FileResponse
 from data_pipeline import main as run_pipeline # Import the pipeline function
 
 # --- Configuration ---
-DB_FILE = "house_prices.db"
+# Use a writable directory like /tmp for the database in a container environment
+DB_FILE = "/tmp/house_prices.db"
 TABLE_NAME = "uk_hpi_cleaned"
 
 
@@ -92,4 +93,5 @@ def get_data_for_region(region_name: str):
         return {"region": region_name, "data": data}
     finally:
         conn.close()
+
 

@@ -2,11 +2,13 @@ import pandas as pd
 import sqlite3
 import requests
 import io
+import os
 
 # --- Configuration ---
+# Use a writable directory like /tmp for the database in a container environment
+DB_FILE = "/tmp/house_prices.db"
+TABLE_NAME = "uk_hpi_cleaned"
 DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
-DB_FILE = "house_prices.db"
-TABLE_NAME = "uk_hpi"
 
 
 def fetch_data(url: str) -> pd.DataFrame:
@@ -60,19 +62,19 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.rename(columns=existing_columns) # This renames 'regionname' to 'region_name' etc.
     
     print("Data cleaned and columns selected.")
-    return df
-
-
-def load_to_db(df: pd.DataFrame, db_file: str, table_name: str):
-    """Loads a DataFrame into a SQLite database."""
+def load_data_to_db(df: pd.DataFrame, db_file: str, table_name: str):
+    """Loads a DataFrame into a SQLite database, replacing the table if it exists."""
     print(f"Loading data into {db_file}...")
     try:
-        with sqlite3.connect(db_file) as conn:
-            df.to_sql(table_name, conn, if_exists="replace", index=False)
+        conn = sqlite3.connect(db_file)
+        # Use if_exists='replace' to handle creating/dropping the table
+        df.to_sql(table_name, conn, if_exists='replace', index=False)
         print("Data loaded successfully.")
     except Exception as e:
         print(f"Error loading data to database: {e}")
-
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 def main():
     """Main function to run the ETL pipeline."""
@@ -84,4 +86,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
