@@ -52,12 +52,13 @@ jobs:
       # It will only run on pushes to the 'main' branch, not on pull requests.
       - name: Deploy to Hugging Face Spaces
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: huggingface/hub-action@v0.5
+        # UPDATED to a newer version of the action
+        uses: huggingface/hub-action@v0.14
         with:
           # You need to create this secret in your GitHub repository settings.
           hf_token: ${{ secrets.HF_TOKEN }}
           # IMPORTANT: Replace this with the ID of your Hugging Face Space.
-          repo_id: "TurneR0und/etl-dashboard"
+          repo_id: "TurnerR0und/etl-dashboard"
           repo_type: space
           commit_message: "Deploying from GitHub action"
 
