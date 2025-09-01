@@ -23,8 +23,9 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job.
     steps:
       # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it.
+      # UPDATED to the latest major version for better compatibility.
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Step 2: Set up a specific version of Python.
       # This ensures our code runs in a consistent environment.
@@ -52,8 +53,8 @@ jobs:
       # It will only run on pushes to the 'main' branch, not on pull requests.
       - name: Deploy to Hugging Face Spaces
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        # UPDATED to a newer version of the action
-        uses: huggingface/hub-action@v0.14
+        # UPDATED to a more general version tag for better stability.
+        uses: huggingface/hub-action@v0
         with:
           # You need to create this secret in your GitHub repository settings.
           hf_token: ${{ secrets.HF_TOKEN }}
