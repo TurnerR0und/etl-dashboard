@@ -6,7 +6,6 @@ colorTo: green
 sdk: docker
 sdk_version: "1.0.0"
 app_file: app.py
-app_port: 8000
 pinned: false
 ---
 
@@ -91,4 +90,4 @@ Simply open `index.html` in your browser.
 
 - Designed as a **portfolio-ready project** to showcase ETL, API, and dashboard integration.  
 - Built with simplicity in mind so the pipeline and deployment steps are clear.  
-- Extendable: swap out SQLite for PostgreSQL, expand the frontend, or add monitoring/metrics for more advanced demos.  
+- Extendable: swap out SQLite for PostgreSQL, expand the frontend, or add monitoring/metrics for more advanced demos.
