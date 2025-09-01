@@ -12,18 +12,24 @@ TABLE_NAME = "uk_hpi_cleaned"
 
 # --- Database Initialization ---
 def initialize_database():
-    """Checks if the database exists, and if not, runs the ETL pipeline to create it."""
-    if not os.path.exists(DB_FILE):
-        print(f"Database not found at '{DB_FILE}'. Running ETL pipeline...")
-        try:
-            run_pipeline()
-            print("ETL pipeline completed successfully.")
-        except Exception as e:
-            print(f"Error running ETL pipeline: {e}")
-            # In a real-world scenario, you might want to exit here if the DB is critical
-            # For this demo, we'll allow the app to start, but endpoints will fail.
-    else:
-        print(f"Database already exists at '{DB_FILE}'. Skipping ETL pipeline.")
+    """
+    Ensures a fresh database is created on application startup by removing any
+    old database file and re-running the ETL pipeline.
+    """
+    # To ensure a clean slate, remove the old DB if it exists
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+        print(f"Removed existing database '{DB_FILE}' to ensure a fresh start.")
+
+    print("Running ETL pipeline to create a fresh database...")
+    try:
+        run_pipeline()
+        print("ETL pipeline completed successfully.")
+    except Exception as e:
+        # If the pipeline fails on startup, the app is not viable.
+        print(f"FATAL: Error running ETL pipeline on startup: {e}")
+        # In a real-world app, you might raise the exception to stop the server from starting.
+        # raise e
 
 # Run the initialization check when the application starts
 initialize_database()
