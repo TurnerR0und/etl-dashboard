@@ -1,82 +1,22 @@
-import sqlite3
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+# Use an official Python runtime as a parent image
+FROM python:3.10-slim
 
-# --- Configuration ---
-DB_FILE = "house_prices.db"
-TABLE_NAME = "uk_hpi_cleaned"
+# Set the working directory in the container
+WORKDIR /app
 
-# Create a FastAPI application instance
-app = FastAPI(
-    title="UK House Price Index API",
-    description="An API to serve cleaned UK house price data.",
-    version="1.0.0",
-)
+# Copy the requirements file into the container at /app
+COPY requirements.txt .
 
-# --- Middleware ---
-# This allows the frontend (even when opened as a local file) to call the API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
-)
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# --- Helper Functions ---
-def db_connection():
-    """Establishes a connection to the SQLite database."""
-    return sqlite3.connect(DB_FILE)
+# Copy the rest of the application's code into the container at /app
+COPY . .
 
-# --- API Endpoints ---
+# Make port 7860 available to the world outside this container
+EXPOSE 7860
 
-@app.get("/", response_class=FileResponse)
-async def serve_dashboard():
-    """Serves the main dashboard HTML file."""
-    return "index.html"
-
-@app.get("/regions")
-def get_regions():
-    """Returns a distinct list of all region names."""
-    conn = db_connection()
-    # Return rows as dictionary-like objects
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
-        query = f"SELECT DISTINCT region_name FROM {TABLE_NAME} ORDER BY region_name"
-        cursor.execute(query)
-        # Use a list comprehension for a concise and readable way to build the list
-        regions = [row['region_name'] for row in cursor.fetchall()]
-        return {"regions": regions}
-    finally:
-        # Ensure the connection is always closed
-        conn.close()
-
-
-@app.get("/data/{region_name}")
-def get_data_for_region(region_name: str):
-    """
-    Returns all data points for a specific region.
-    The region_name is a path parameter.
-    """
-    conn = db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
-        # Use a parameterized query to prevent SQL injection vulnerabilities
-        query = f"""
-            SELECT date, average_price, "index"
-            FROM {TABLE_NAME}
-            WHERE region_name = ?
-            ORDER BY date
-        """
-        cursor.execute(query, (region_name,))
-        
-        # Convert each row to a dictionary
-        data = [dict(row) for row in cursor.fetchall()]
-        
-        return {"region": region_name, "data": data}
-    finally:
-        conn.close()
+# Define the command to run your app
+# Use 0.0.0.0 to allow connections from outside the container
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "7860"]
 
