@@ -23,9 +23,11 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job.
     steps:
       # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it.
-      # UPDATED to the latest major version for better compatibility.
+      # We fetch the full history, which is required for pushing to a different remote.
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Step 2: Set up a specific version of Python.
       # This ensures our code runs in a consistent environment.
@@ -48,18 +50,19 @@ jobs:
       - name: Run API tests (Placeholder)
         run: echo "No API tests configured yet, but this is where they would go."
 
-      # Step 6: Deploy to Hugging Face Spaces
-      # This action pushes the repository to a Hugging Face Space.
-      # It will only run on pushes to the 'main' branch, not on pull requests.
+      # Step 6: Deploy to Hugging Face Spaces using a direct Git push.
+      # This step will only run on pushes to the 'main' branch.
       - name: Deploy to Hugging Face Spaces
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        # UPDATED to a more general version tag for better stability.
-        uses: huggingface/hub-action@v0
-        with:
-          # You need to create this secret in your GitHub repository settings.
-          hf_token: ${{ secrets.HF_TOKEN }}
-          # IMPORTANT: Replace this with the ID of your Hugging Face Space.
-          repo_id: "TurnerR0und/etl-dashboard"
-          repo_type: space
-          commit_message: "Deploying from GitHub action"
+        env:
+          # Your HF Token is used for authentication.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Add the Hugging Face Space as a new Git remote.
+          # The URL is constructed using your HF username and the token for authentication.
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/TurnerR0und/etl-dashboard
+          
+          # Force push the 'main' branch from your GitHub repo to the 'main' branch of the Hugging Face Space remote.
+          # The --force flag is used to ensure the Space is an exact mirror of your GitHub repo.
+          git push --force hf main
 
