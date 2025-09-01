@@ -60,7 +60,7 @@ jobs:
         run: |
           # Add the Hugging Face Space as a new Git remote.
           # The URL is constructed using your HF username and the token for authentication.
-          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/TurnerR0und/etl-dashboard
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/TurneR0und/etl-dashboard
           
           # Force push the 'main' branch from your GitHub repo to the 'main' branch of the Hugging Face Space remote.
           # The --force flag is used to ensure the Space is an exact mirror of your GitHub repo.
