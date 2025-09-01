@@ -1,0 +1,60 @@
+# This is a GitHub Actions workflow file.
+# It defines a set of automated jobs that will run in response to events,
+# such as pushing code to the repository.
+
+# Name of the workflow, which will be displayed on the "Actions" tab in GitHub.
+name: Python ETL CI/CD Pipeline
+
+# Controls when the workflow will run.
+# We're configuring it to run on every push to the 'main' branch.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel.
+jobs:
+  # This workflow contains a single job called "build-and-test"
+  build-and-test:
+    # The type of runner that the job will run on. We're using the latest Ubuntu version.
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job.
+    steps:
+      # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it.
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up a specific version of Python.
+      # This ensures our code runs in a consistent environment.
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Step 3: Install our project's dependencies from requirements.txt.
+      # We use a caching action to speed up subsequent runs by saving the installed packages.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # Step 4: Run the data pipeline.
+      # This is our "integration test". If this script fails, it means there's a problem
+      # with our data fetching, cleaning, or database loading logic.
+      # We use 'python3' for consistency with our local environment.
+      - name: Run ETL Data Pipeline
+        run: python3 data_pipeline.py
+
+      # Step 5: (Placeholder for future tests)
+      # In a more advanced project, you would add more specific tests here.
+      # For example, using a library like 'pytest' to test the API endpoints.
+      - name: Run API tests (Placeholder)
+        run: echo "No API tests configured yet, but this is where they would go."
+
+      # Step 6: (Placeholder for deployment)
+      # If the steps above succeed, this is where you would add a step to deploy
+      # your application to a cloud service like Hugging Face Spaces, Streamlit Cloud, or Heroku.
+      - name: Deploy to cloud (Placeholder)
+        run: echo "Deployment step would go here."
