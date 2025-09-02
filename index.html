@@ -13,6 +13,9 @@
         body {
             font-family: 'Inter', sans-serif;
         }
+        select:disabled {
+            background-color: #f3f4f6; /* A slightly grayer background when disabled */
+        }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,7 +33,7 @@
             <!-- Controls Section -->
             <div class="flex flex-col md:flex-row items-center gap-4 mb-6">
                 <label for="region-select" class="font-semibold">Select a Region:</label>
-                <select id="region-select" class="w-full md:w-auto p-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <select id="region-select" class="w-full md:w-auto p-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" disabled>
                     <option value="">Loading regions...</option>
                 </select>
             </div>
@@ -55,179 +58,134 @@
     </div>
 
     <script>
-        const regionSelect = document.getElementById('region-select');
-        const chartContainer = document.getElementById('chart-container');
-        const loader = document.getElementById('loader');
-        const errorMessage = document.getElementById('error-message');
-        const initialMessage = document.getElementById('initial-message');
-        const chartCanvas = document.getElementById('priceChart');
-        let priceChart = null;
+        // Use strict mode to catch common coding mistakes
+        'use strict';
 
-        // --- API Base URL ---
-        // We use a relative path, so it works both locally and when deployed.
-        const API_BASE_URL = '';
+        // --- Main execution wrapped in a function ---
+        (function() {
+            console.log("Dashboard script initializing...");
 
-        /**
-         * Fetches the list of regions from the API and populates the dropdown.
-         */
-        async function loadRegions() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/regions`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
-                regionSelect.innerHTML = '<option value="">-- Please select a region --</option>'; // Clear loading text
-                data.regions.forEach(region => {
-                    const option = document.createElement('option');
-                    option.value = region;
-                    option.textContent = region;
-                    regionSelect.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error fetching regions:', error);
-                regionSelect.innerHTML = '<option value="">Error loading regions</option>';
-                showError("Error: Could not load region data from the API. Make sure the API server is running.");
-            }
-        }
+            const regionSelect = document.getElementById('region-select');
+            const loader = document.getElementById('loader');
+            const errorMessage = document.getElementById('error-message');
+            const initialMessage = document.getElementById('initial-message');
+            const chartCanvas = document.getElementById('priceChart');
+            let priceChart = null;
 
-        /**
-         * Fetches data for the selected region and updates the chart.
-         * @param {string} regionName The name of the region to fetch data for.
-         */
-        async function loadRegionData(regionName) {
-            if (!regionName) {
-                // Hide chart and show initial message if no region is selected
-                if(priceChart) priceChart.destroy();
-                chartCanvas.style.display = 'none';
-                initialMessage.style.display = 'flex';
-                return;
+            // Check if all essential elements are found
+            if (!regionSelect || !loader || !errorMessage || !initialMessage || !chartCanvas) {
+                console.error("Initialization failed: One or more essential HTML elements are missing from the page.");
+                return; // Stop execution if the page isn't set up correctly
             }
 
-            showLoader(true);
-            initialMessage.style.display = 'none';
-            chartCanvas.style.display = 'block';
-            showError(''); // Clear previous errors
+            const API_BASE_URL = '';
 
-            try {
-                const response = await fetch(`${API_BASE_URL}/data/${encodeURIComponent(regionName)}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                updateChart(result.data);
-            } catch (error) {
-                console.error(`Error fetching data for ${regionName}:`, error);
-                showError(`Failed to load data for ${regionName}. Please try again.`);
-            } finally {
-                showLoader(false);
-            }
-        }
-
-        /**
-         * Updates the Chart.js instance with new data.
-         * @param {Array} data The array of data points for the chart.
-         */
-        function updateChart(data) {
-            const labels = data.map(d => d.date.split('T')[0]); // Format date for display
-            const prices = data.map(d => d.average_price);
-            const indices = data.map(d => d.index);
-
-            const chartData = {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Average Price (£)',
-                        data: prices,
-                        borderColor: 'rgb(59, 130, 246)',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        yAxisID: 'y-price',
-                        tension: 0.1,
-                        fill: true,
-                    },
-                    {
-                        label: 'Price Index',
-                        data: indices,
-                        borderColor: 'rgb(239, 68, 68)',
-                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        yAxisID: 'y-index',
-                        tension: 0.1,
-                        fill: true,
+            async function loadRegions() {
+                console.log("Attempting to load regions...");
+                try {
+                    const response = await fetch(`${API_BASE_URL}/regions`);
+                    console.log("Fetch response received for /regions");
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
-                ]
-            };
-
-            const config = {
-                type: 'line',
-                data: chartData,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            title: { display: true, text: 'Date' }
-                        },
-                        'y-price': {
-                            type: 'linear',
-                            position: 'left',
-                            title: { display: true, text: 'Average Price (£)' },
-                            grid: {
-                                drawOnChartArea: false, 
-                            },
-                        },
-                        'y-index': {
-                            type: 'linear',
-                            position: 'right',
-                            title: { display: true, text: 'Price Index (relative to baseline)' }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                        },
-                        legend: {
-                            position: 'top',
-                        }
-                    }
+                    const data = await response.json();
+                    console.log("Region data successfully parsed:", data);
+                    
+                    regionSelect.innerHTML = '<option value="">-- Please select a region --</option>';
+                    data.regions.forEach(region => {
+                        const option = document.createElement('option');
+                        option.value = region;
+                        option.textContent = region;
+                        regionSelect.appendChild(option);
+                    });
+                    regionSelect.disabled = false;
+                    console.log("Region dropdown populated and enabled.");
+                } catch (error) {
+                    console.error('Error fetching regions:', error);
+                    regionSelect.innerHTML = '<option value="">Error loading regions</option>';
+                    regionSelect.disabled = true;
+                    showError("Error: Could not load region data from the API.");
                 }
-            };
-
-            if (priceChart) {
-                priceChart.destroy();
             }
-            priceChart = new Chart(chartCanvas, config);
-        }
 
-        /**
-         * Toggles the visibility of the loading spinner.
-         * @param {boolean} visible Whether the loader should be visible.
-         */
-        function showLoader(visible) {
-            loader.classList.toggle('hidden', !visible);
-        }
+            async function loadRegionData(regionName) {
+                if (!regionName) {
+                    if(priceChart) priceChart.destroy();
+                    chartCanvas.style.display = 'none';
+                    initialMessage.style.display = 'flex';
+                    return;
+                }
 
-        /**
-         * Displays an error message to the user.
-         * @param {string} message The message to display.
-         */
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.classList.toggle('hidden', !message);
-        }
+                showLoader(true);
+                initialMessage.style.display = 'none';
+                chartCanvas.style.display = 'block';
+                showError('');
 
-        // --- Event Listeners ---
-        regionSelect.addEventListener('change', (event) => {
-            loadRegionData(event.target.value);
-        });
+                try {
+                    const response = await fetch(`${API_BASE_URL}/data/${encodeURIComponent(regionName)}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    updateChart(result.data);
+                } catch (error) {
+                    console.error(`Error fetching data for ${regionName}:`, error);
+                    showError(`Failed to load data for ${regionName}. Please try again.`);
+                } finally {
+                    showLoader(false);
+                }
+            }
 
-        // --- Initial Load ---
-        document.addEventListener('DOMContentLoaded', () => {
-            chartCanvas.style.display = 'none'; // Hide chart initially
-            loadRegions();
-        });
+            function updateChart(data) {
+                const labels = data.map(d => d.date.split('T')[0]);
+                const prices = data.map(d => d.average_price);
+                const indices = data.map(d => d.index);
+                const chartData = {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Average Price (£)', data: prices, borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)', yAxisID: 'y-price', tension: 0.1, fill: true,
+                    }, {
+                        label: 'Price Index', data: indices, borderColor: 'rgb(239, 68, 68)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)', yAxisID: 'y-index', tension: 0.1, fill: true,
+                    }]
+                };
+                const config = {
+                    type: 'line', data: chartData,
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: {
+                            x: { title: { display: true, text: 'Date' } },
+                            'y-price': { type: 'linear', position: 'left', title: { display: true, text: 'Average Price (£)' }, grid: { drawOnChartArea: false, }, },
+                            'y-index': { type: 'linear', position: 'right', title: { display: true, text: 'Price Index (relative to baseline)' } }
+                        },
+                        plugins: { tooltip: { mode: 'index', intersect: false, }, legend: { position: 'top', } }
+                    }
+                };
+                if (priceChart) priceChart.destroy();
+                priceChart = new Chart(chartCanvas, config);
+            }
 
+            function showLoader(visible) { loader.classList.toggle('hidden', !visible); }
+            function showError(message) {
+                console.error("Displaying error to user:", message);
+                errorMessage.textContent = message;
+                errorMessage.classList.toggle('hidden', !message);
+            }
+
+            function initializeApp() {
+                 console.log("DOM content loaded. Initializing app.");
+                 chartCanvas.style.display = 'none';
+                 regionSelect.addEventListener('change', (event) => { loadRegionData(event.target.value); });
+                 loadRegions();
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initializeApp);
+            } else {
+                initializeApp();
+            }
+        })();
     </script>
 </body>
 </html>
