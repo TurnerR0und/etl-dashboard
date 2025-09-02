@@ -1,4 +1,6 @@
 This file tells Git which files and folders to ignore.
+Ignore editor/IDE settings
+.vscode/
 Ignore the Python virtual environment folder
 /etl-env/
 
