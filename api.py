@@ -6,8 +6,8 @@ from fastapi.responses import FileResponse
 from data_pipeline import main as run_pipeline # Import the pipeline function
 
 # --- Configuration ---
-# Use a writable directory like /tmp for the database in a container environment
-DB_FILE = "/tmp/house_prices.db"
+# Database path is configurable via env var. Defaults to a local file for dev.
+DB_FILE = os.getenv("DB_FILE", "house_prices.db")
 TABLE_NAME = "uk_hpi_cleaned"
 
 
@@ -58,7 +58,7 @@ def db_connection():
 @app.get("/", response_class=FileResponse)
 async def serve_dashboard():
     """Serves the main dashboard HTML file."""
-    return "index.html"
+    return FileResponse("index.html")
 
 @app.get("/regions")
 def get_regions():
@@ -93,5 +93,3 @@ def get_data_for_region(region_name: str):
         return {"region": region_name, "data": data}
     finally:
         conn.close()
-
-

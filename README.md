@@ -61,8 +61,12 @@ uvicorn api:app --reload
 
 The server will be running at: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
-Open the dashboard:  
-Simply open `index.html` in your browser.
+Open the dashboard:
+- Run the API and open `http://127.0.0.1:8000/` (the server serves the dashboard at `/`).
+
+Note on configuration:
+- The SQLite database path is controlled via the `DB_FILE` environment variable. Defaults to `house_prices.db` for local dev.
+- On Hugging Face Spaces (Docker), the image sets `DB_FILE=/data/house_prices.db` so data persists and the path is writable.
 
 ---
 

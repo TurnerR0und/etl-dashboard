@@ -5,8 +5,8 @@ import io
 import os
 
 # --- Configuration ---
-# Use a writable directory like /tmp for the database in a container environment
-DB_FILE = "/tmp/house_prices.db"
+# Database path is configurable via env var. Defaults to a local file for dev.
+DB_FILE = os.getenv("DB_FILE", "house_prices.db")
 TABLE_NAME = "uk_hpi_cleaned"
 DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
 
@@ -89,4 +89,3 @@ def main():
 # This allows the script to be run directly
 if __name__ == "__main__":
     main()
-
