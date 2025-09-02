@@ -1,115 +1,76 @@
-import pandas as pd
-import sqlite3
-import requests
-import io
 import os
+import io
+import pandas as pd
+import requests
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+
+# Load environment variables from .env file for local development
+load_dotenv()
 
 # --- Configuration ---
-def _resolve_db_path() -> str:
-    """Resolve a writable DB path with sensible fallbacks.
-    Order: $DB_FILE -> house_prices.db (CWD) -> /data/house_prices.db -> /tmp/house_prices.db
-    """
-    candidates = []
-    env_path = os.getenv("DB_FILE")
-    if env_path:
-        candidates.append(env_path)
-    candidates.extend([
-        os.path.abspath("house_prices.db"),
-        "/data/house_prices.db",
-        "/tmp/house_prices.db",
-    ])
-
-    for path in candidates:
-        try:
-            dirpath = os.path.dirname(path) or "."
-            os.makedirs(dirpath, exist_ok=True)
-            if os.access(dirpath, os.W_OK):
-                return path
-        except Exception:
-            continue
-    # Fallback to current directory name if all else fails
-    return os.path.abspath("house_prices.db")
-
-DB_FILE = _resolve_db_path()
-TABLE_NAME = "uk_hpi_cleaned"
+# The public URL for the data source
 DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
-
+# Get the database connection string from environment variables
+DATABASE_URL = os.environ.get("DATABASE_URL")
+TABLE_NAME = "uk_hpi"
 
 def fetch_data(url: str) -> pd.DataFrame:
     """Fetches CSV data from a URL and returns it as a pandas DataFrame."""
     print(f"Fetching data from {url}...")
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Raises an exception for bad status codes
+        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
         print("Data fetched successfully.")
+        # Use io.StringIO to treat the CSV string as a file
         csv_content = io.StringIO(response.text)
-        df = pd.read_csv(csv_content)
-        return df
+        return pd.read_csv(csv_content)
     except requests.exceptions.RequestException as e:
         print(f"Error fetching data: {e}")
-        return pd.DataFrame() # Return empty dataframe on error
-
+        return None
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Cleans and transforms the raw house price index data."""
-    if df.empty:
-        return df
-
+    """Cleans and transforms the raw DataFrame."""
+    if df is None:
+        return None
     print("Cleaning data...")
-    # Clean column names (lowercase, remove special chars, replace spaces with _)
-    df.columns = df.columns.str.lower().str.replace('[^a-zA-Z0-9_]', '', regex=True).str.replace(' ', '_')
-
-    # Rename columns for clarity and consistency
-    rename_map = {
-        'regionname': 'region_name',
-        'averageprice': 'average_price'
-    }
-    df = df.rename(columns=rename_map)
-
-    # Select only the columns we need
-    required_columns = ['date', 'region_name', 'average_price', 'index']
-    # Check if all required columns exist
-    if not all(col in df.columns for col in required_columns):
-        print("Error: Missing one or more required columns after cleaning.")
-        return pd.DataFrame()
-
-    df_selected = df[required_columns].copy()
-
+    # Select and rename columns for clarity and consistency
+    df = df[['Date', 'RegionName', 'AveragePrice', 'Index']].rename(columns={
+        'Date': 'date',
+        'RegionName': 'region_name',
+        'AveragePrice': 'average_price',
+        'Index': 'index'
+    })
     # Convert 'date' column to datetime objects
-    df_selected['date'] = pd.to_datetime(df_selected['date'])
-
-    # Drop rows where region_name is null
-    df_selected.dropna(subset=['region_name'], inplace=True)
-
+    df['date'] = pd.to_datetime(df['date'])
     print("Data cleaned and columns selected.")
-    return df_selected
+    return df
 
-
-def load_data_to_db(df: pd.DataFrame, db_file: str, table_name: str):
-    """Loads a DataFrame into a SQLite database, replacing the table if it exists."""
-    if df.empty:
-        print("Skipping database load because the dataframe is empty.")
+def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str):
+    """Loads a DataFrame into a PostgreSQL database table."""
+    if df is None or not db_url:
+        print("Data loading skipped due to missing DataFrame or database URL.")
         return
-
-    print(f"Loading data into {db_file}...")
+    print(f"Loading data into database table '{table_name}'...")
     try:
-        conn = sqlite3.connect(db_file)
-        # Use if_exists='replace' to handle creating/dropping the table
-        df.to_sql(table_name, conn, if_exists='replace', index=False)
+        # Create a SQLAlchemy engine to connect to the database
+        engine = create_engine(db_url)
+        # Load the DataFrame into the SQL table, replacing it if it already exists
+        df.to_sql(table_name, engine, if_exists='replace', index=False)
         print("Data loaded successfully.")
     except Exception as e:
         print(f"Error loading data to database: {e}")
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
 
 def main():
     """Main function to run the ETL pipeline."""
-    raw_df = fetch_data(DATA_URL)
-    cleaned_df = clean_data(raw_df)
-    load_data_to_db(cleaned_df, DB_FILE, TABLE_NAME) # Corrected function name
+    if not DATABASE_URL:
+        print("FATAL: DATABASE_URL environment variable not set. Aborting.")
+        return
 
-# This allows the script to be run directly
+    raw_data_df = fetch_data(DATA_URL)
+    cleaned_df = clean_data(raw_data_df)
+    load_data_to_db(cleaned_df, DATABASE_URL, TABLE_NAME)
+
 if __name__ == "__main__":
     main()
+
