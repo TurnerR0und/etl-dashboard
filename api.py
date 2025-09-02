@@ -1,8 +1,8 @@
 import sqlite3
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from data_pipeline import main as run_pipeline # Import the pipeline function
 
 # --- Configuration ---
@@ -74,7 +74,7 @@ app.add_middleware(
 # --- Helper Functions ---
 def db_connection():
     """Establishes a connection to the SQLite database."""
-    return sqlite3.connect(DB_FILE)
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 # --- API Endpoints ---
 
@@ -86,25 +86,32 @@ async def serve_dashboard():
 @app.get("/regions")
 def get_regions():
     """Returns a distinct list of all region names."""
-    conn = db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
     try:
+        conn = db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         query = f"SELECT DISTINCT region_name FROM {TABLE_NAME} ORDER BY region_name"
         cursor.execute(query)
         regions = [row['region_name'] for row in cursor.fetchall()]
         return {"regions": regions}
+    except Exception as e:
+        # Surface the root cause to logs and client
+        print(f"ERROR /regions: {e} | DB_FILE={DB_FILE}")
+        raise HTTPException(status_code=500, detail=f"Failed to load regions: {e}")
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.get("/data/{region_name}")
 def get_data_for_region(region_name: str):
     """Returns all data points for a specific region."""
-    conn = db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
     try:
+        conn = db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         query = f"""
             SELECT date, average_price, "index"
             FROM {TABLE_NAME}
@@ -114,5 +121,38 @@ def get_data_for_region(region_name: str):
         cursor.execute(query, (region_name,))
         data = [dict(row) for row in cursor.fetchall()]
         return {"region": region_name, "data": data}
+    except Exception as e:
+        print(f"ERROR /data/{region_name}: {e} | DB_FILE={DB_FILE}")
+        raise HTTPException(status_code=500, detail=f"Failed to load data for {region_name}: {e}")
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.get("/healthz")
+def healthz():
+    """Basic health and DB status for debugging."""
+    info = {"db_file": DB_FILE, "table": TABLE_NAME}
+    try:
+        conn = db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (TABLE_NAME,),
+        )
+        exists = cursor.fetchone() is not None
+        info["table_exists"] = exists
+        if exists:
+            cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
+            info["row_count"] = cursor.fetchone()[0]
+        return JSONResponse(info)
+    except Exception as e:
+        info["error"] = str(e)
+        return JSONResponse(info, status_code=500)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
