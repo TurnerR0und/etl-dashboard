@@ -5,8 +5,32 @@ import io
 import os
 
 # --- Configuration ---
-# Database path is configurable via env var. Defaults to a local file for dev.
-DB_FILE = os.getenv("DB_FILE", "house_prices.db")
+def _resolve_db_path() -> str:
+    """Resolve a writable DB path with sensible fallbacks.
+    Order: $DB_FILE -> house_prices.db (CWD) -> /data/house_prices.db -> /tmp/house_prices.db
+    """
+    candidates = []
+    env_path = os.getenv("DB_FILE")
+    if env_path:
+        candidates.append(env_path)
+    candidates.extend([
+        os.path.abspath("house_prices.db"),
+        "/data/house_prices.db",
+        "/tmp/house_prices.db",
+    ])
+
+    for path in candidates:
+        try:
+            dirpath = os.path.dirname(path) or "."
+            os.makedirs(dirpath, exist_ok=True)
+            if os.access(dirpath, os.W_OK):
+                return path
+        except Exception:
+            continue
+    # Fallback to current directory name if all else fails
+    return os.path.abspath("house_prices.db")
+
+DB_FILE = _resolve_db_path()
 TABLE_NAME = "uk_hpi_cleaned"
 DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
 
