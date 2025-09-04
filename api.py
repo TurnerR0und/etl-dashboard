@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
-from cachetools import TTLCache # <-- Import TTLCache
+#from cachetools import TTLCache # <-- Import TTLCache
 
 # Load environment variables from .env file for local development
 load_dotenv()
@@ -15,7 +15,8 @@ load_dotenv()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 TABLE_NAME = "uk_hpi"
 API_SECRET_TOKEN = os.environ.get("API_SECRET_TOKEN") # <-- Add this for security
-
+# New Redis Configuration
+REDIS_URL = os.environ.get("REDIS_URL") # <-- Add this
 # --- Security Dependency ---
 api_key_header = APIKeyHeader(name="X-API-KEY")
 
@@ -29,10 +30,25 @@ def get_api_key(api_key: str = Depends(api_key_header)):
     return api_key
 
 # --- Cache Configuration ---
-# Cache for regions: max 1 item, expires every hour (3600 seconds)
-regions_cache = TTLCache(maxsize=1, ttl=3600) 
+# Cache for regions: max 1 item, expires every hour (3600 seconds) Commented out to use Redis
+#regions_cache = TTLCache(maxsize=1, ttl=3600) 
 # Cache for region data: max 100 regions, expires every hour
-region_data_cache = TTLCache(maxsize=100, ttl=3600)
+#region_data_cache = TTLCache(maxsize=100, ttl=3600)
+
+# Initialize Redis connection
+# The decode_responses=True is important - it ensures that data read 
+# from Redis is automatically converted from bytes to strings.
+try:
+    if not REDIS_URL:
+        raise ValueError("REDIS_URL environment variable not set.")
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client.ping() # Check the connection
+    print("Successfully connected to Redis.")
+    CACHE_ENABLED = True
+except Exception as e:
+    print(f"WARNING: Could not connect to Redis. Caching will be disabled. Error: {e}")
+    redis_client = None
+    CACHE_ENABLED = False
 
 # --- Database Initialization ---
 def initialize_database():
@@ -83,27 +99,19 @@ def db_connection():
 
 # --- API Endpoints ---
 
-@app.get("/", response_class=FileResponse)
-async def read_index():
-    """
-    Serves the frontend dashboard.
-    Includes cache-control headers to prevent browser caching issues.
-    """
-    return FileResponse("index.html", headers={
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    })
-
 @app.get("/regions")
 def get_regions():
     """Returns a distinct list of all region names."""
-    # Check cache first
-    if "regions" in regions_cache:
-        print("CACHE HIT: Returning regions from cache.")
-        return regions_cache["regions"]
+    if CACHE_ENABLED:
+        # Check cache first
+        cached_regions = redis_client.get("regions")
+        if cached_regions:
+            print("CACHE HIT: Returning regions from Redis.")
+            import json
+            return json.loads(cached_regions)
 
     print("CACHE MISS: Fetching regions from database.")
+    # ... (the rest of the function is the same, but the caching part changes)
     engine = db_connection()
     if not engine:
         return {"error": "Database connection failed"}
@@ -112,20 +120,29 @@ def get_regions():
         result = conn.execute(query)
         regions = [row[0] for row in result]
         
-        # Store result in cache
         response_data = {"regions": regions}
-        regions_cache["regions"] = response_data
+
+        if CACHE_ENABLED:
+            # Store result in Redis cache with an expiration of 1 hour (3600 seconds)
+            import json
+            redis_client.set("regions", json.dumps(response_data), ex=3600)
+        
         return response_data
 
 @app.get("/data/{region_name}")
 def get_data_for_region(region_name: str):
     """Returns all data points for a specific region, with formatted date."""
-    # Check cache first
-    if region_name in region_data_cache:
-        print(f"CACHE HIT: Returning data for {region_name} from cache.")
-        return region_data_cache[region_name]
+    cache_key = f"data:{region_name}" # Use a prefix for clarity
+
+    if CACHE_ENABLED:
+        cached_data = redis_client.get(cache_key)
+        if cached_data:
+            print(f"CACHE HIT: Returning data for {region_name} from Redis.")
+            import json
+            return json.loads(cached_data)
 
     print(f"CACHE MISS: Fetching data for {region_name} from database.")
+    # ... (the rest of the function is the same, but the caching part changes)
     engine = db_connection()
     if not engine:
         return {"error": "Database connection failed"}
@@ -139,18 +156,21 @@ def get_data_for_region(region_name: str):
         result = conn.execute(query, {"region": region_name})
         data = [dict(row._mapping) for row in result]
         
-        # Store result in cache
         response_data = {"region": region_name, "data": data}
-        region_data_cache[region_name] = response_data
+        
+        if CACHE_ENABLED:
+            import json
+            redis_client.set(cache_key, json.dumps(response_data), ex=3600)
+            
         return response_data
 
-@app.post("/admin/clear-cache", dependencies=[Depends(get_api_key)])
-def clear_all_caches():
+#@app.post("/admin/clear-cache", dependencies=[Depends(get_api_key)])
+#def clear_all_caches():
     """
     Clears all in-memory caches.
     This is a protected endpoint that requires a valid API key.
     """
-    print("ADMIN: Received request to clear caches.")
-    regions_cache.clear()
-    region_data_cache.clear()
-    return {"status": "success", "message": "All caches cleared."}
+#    print("ADMIN: Received request to clear caches.")
+#    regions_cache.clear()
+#    region_data_cache.clear()
+#    return {"status": "success", "message": "All caches cleared."}

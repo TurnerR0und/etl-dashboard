@@ -123,7 +123,7 @@ def main():
     load_data_to_db(validated_df, DATABASE_URL, TABLE_NAME)
 
     # After loading data, clear the cache
-    clear_api_cache() # <-- Add this call
+    # clear_api_cache() # Not needed during initial load on startup
 
 if __name__ == "__main__":
     main()
