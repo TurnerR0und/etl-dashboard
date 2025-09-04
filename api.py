@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from cachetools import TTLCache # <-- Import TTLCache
 
 # Load environment variables from .env file for local development
 load_dotenv()
@@ -12,6 +13,12 @@ load_dotenv()
 # --- Configuration ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
 TABLE_NAME = "uk_hpi"
+
+# --- Cache Configuration ---
+# Cache for regions: max 1 item, expires every hour (3600 seconds)
+regions_cache = TTLCache(maxsize=1, ttl=3600) 
+# Cache for region data: max 100 regions, expires every hour
+region_data_cache = TTLCache(maxsize=100, ttl=3600)
 
 # --- Database Initialization ---
 def initialize_database():
@@ -37,7 +44,7 @@ initialize_database()
 app = FastAPI(
     title="UK House Price Index API",
     description="An API to serve cleaned UK house price data and the frontend dashboard.",
-    version="2.0.0", # Version bump!
+    version="2.0.0",
 )
 
 # --- CORS Middleware ---
@@ -77,6 +84,12 @@ async def read_index():
 @app.get("/regions")
 def get_regions():
     """Returns a distinct list of all region names."""
+    # Check cache first
+    if "regions" in regions_cache:
+        print("CACHE HIT: Returning regions from cache.")
+        return regions_cache["regions"]
+
+    print("CACHE MISS: Fetching regions from database.")
     engine = db_connection()
     if not engine:
         return {"error": "Database connection failed"}
@@ -84,16 +97,25 @@ def get_regions():
         query = text(f"SELECT DISTINCT region_name FROM {TABLE_NAME} ORDER BY region_name")
         result = conn.execute(query)
         regions = [row[0] for row in result]
-        return {"regions": regions}
+        
+        # Store result in cache
+        response_data = {"regions": regions}
+        regions_cache["regions"] = response_data
+        return response_data
 
 @app.get("/data/{region_name}")
 def get_data_for_region(region_name: str):
     """Returns all data points for a specific region, with formatted date."""
+    # Check cache first
+    if region_name in region_data_cache:
+        print(f"CACHE HIT: Returning data for {region_name} from cache.")
+        return region_data_cache[region_name]
+
+    print(f"CACHE MISS: Fetching data for {region_name} from database.")
     engine = db_connection()
     if not engine:
         return {"error": "Database connection failed"}
     with engine.connect() as conn:
-        # Use TO_CHAR for PostgreSQL date formatting
         query = text(f"""
             SELECT TO_CHAR(date, 'YYYY-MM-DD') as date, average_price, "index"
             FROM {TABLE_NAME}
@@ -102,5 +124,8 @@ def get_data_for_region(region_name: str):
         """)
         result = conn.execute(query, {"region": region_name})
         data = [dict(row._mapping) for row in result]
-        return {"region": region_name, "data": data}
-
+        
+        # Store result in cache
+        response_data = {"region": region_name, "data": data}
+        region_data_cache[region_name] = response_data
+        return response_data
