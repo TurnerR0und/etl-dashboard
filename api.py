@@ -98,6 +98,17 @@ def db_connection():
         return None
 
 # --- API Endpoints ---
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    """
+    Serves the frontend dashboard.
+    Includes cache-control headers to prevent browser caching issues.
+    """
+    return FileResponse("index.html", headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 @app.get("/regions")
 def get_regions():
