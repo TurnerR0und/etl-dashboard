@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+import redis
 #from cachetools import TTLCache # <-- Import TTLCache
 
 # Load environment variables from .env file for local development
