@@ -1,6 +1,7 @@
 import os
 import subprocess
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
@@ -13,6 +14,19 @@ load_dotenv()
 # --- Configuration ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
 TABLE_NAME = "uk_hpi"
+API_SECRET_TOKEN = os.environ.get("API_SECRET_TOKEN") # <-- Add this for security
+
+# --- Security Dependency ---
+api_key_header = APIKeyHeader(name="X-API-KEY")
+
+def get_api_key(api_key: str = Depends(api_key_header)):
+    """Dependency to verify the API key."""
+    if not API_SECRET_TOKEN or api_key != API_SECRET_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key"
+        )
+    return api_key
 
 # --- Cache Configuration ---
 # Cache for regions: max 1 item, expires every hour (3600 seconds)
@@ -129,3 +143,14 @@ def get_data_for_region(region_name: str):
         response_data = {"region": region_name, "data": data}
         region_data_cache[region_name] = response_data
         return response_data
+
+@app.post("/admin/clear-cache", dependencies=[Depends(get_api_key)])
+def clear_all_caches():
+    """
+    Clears all in-memory caches.
+    This is a protected endpoint that requires a valid API key.
+    """
+    print("ADMIN: Received request to clear caches.")
+    regions_cache.clear()
+    region_data_cache.clear()
+    return {"status": "success", "message": "All caches cleared."}

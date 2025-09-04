@@ -91,6 +91,26 @@ def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str):
     except Exception as e:
         print(f"Error loading data to database: {e}")
 
+def clear_api_cache():
+    """Sends a request to the running API to clear its cache."""
+    api_url = os.environ.get("API_URL")
+    api_secret_token = os.environ.get("API_SECRET_TOKEN")
+
+    if not api_url or not api_secret_token:
+        print("API_URL or API_SECRET_TOKEN not set. Skipping cache clearing.")
+        return
+
+    endpoint = f"{api_url.rstrip('/')}/admin/clear-cache"
+    headers = {"X-API-KEY": api_secret_token}
+    
+    try:
+        print(f"Attempting to clear API cache at {endpoint}...")
+        response = requests.post(endpoint, headers=headers)
+        response.raise_for_status() # Raises an exception for bad status codes (4xx or 5xx)
+        print("API cache cleared successfully.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error clearing API cache: {e}")
+
 def main():
     """Main function to run the ETL pipeline."""
     if not DATABASE_URL:
@@ -101,6 +121,9 @@ def main():
     cleaned_df = clean_data(raw_data_df)
     validated_df = validate_data(cleaned_df)
     load_data_to_db(validated_df, DATABASE_URL, TABLE_NAME)
+
+    # After loading data, clear the cache
+    clear_api_cache() # <-- Add this call
 
 if __name__ == "__main__":
     main()
