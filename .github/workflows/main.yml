@@ -55,7 +55,7 @@ jobs:
           # Use a direct git push for deployment
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
-          git remote add space https://TurnerR0und:${HF_TOKEN}@huggingface.co/spaces/TurnerR0und/etl-dashboard
+          git remote add space https://user:${HF_TOKEN}@huggingface.co/spaces/TurneR0und/etl-dashboard
           # Ensure we are on a local 'main' branch for pushing
           git checkout -B main
           # Push the current HEAD to the Space's main branch
