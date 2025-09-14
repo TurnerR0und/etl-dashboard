@@ -7,30 +7,33 @@ import asyncio
 
 # This fixture will be used by all tests in this module
 @pytest.fixture(scope="module")
+@pytest.fixture(scope="module")
 def client() -> TestClient:
     """
-    Provides a TestClient for the API after setting up and tearing down
-    a dedicated test database.
+    Provides a TestClient for the API after setting up a dedicated test database.
+    Includes error handling to expose pipeline failures during test setup.
     """
-    os.environ["DATABASE_URL"] = "sqlite:///./test_database.db"
+    db_path = "./test_api_database.db"
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     
-    # --- SETUP: Run the data pipeline to create the test DB ---
-    # We directly import and run the pipeline's main function.
-    # This is more reliable than using a subprocess.
-    from data_pipeline import main as run_pipeline
-    
-    # Run the async main function from the pipeline
-    asyncio.run(run_pipeline())
-    
+    # --- SETUP: Run the data pipeline with explicit error catching ---
+    try:
+        from data_pipeline import main as run_pipeline
+        log.info("Test setup: Running data pipeline to create test database...")
+        asyncio.run(run_pipeline())
+        log.info("Test setup: Data pipeline finished successfully.")
+    except Exception as e:
+        # If the pipeline fails for any reason, fail the test suite with a clear error
+        pytest.fail(f"Data pipeline failed during test setup: {e}", pytrace=True)
+
     # Now that the DB is created, we can import the app
     from api import app
     
-    # Yield the TestClient for the tests to use
     with TestClient(app) as c:
         yield c
         
-    # --- TEARDOWN: Clean up the test database after tests are done ---
-    os.remove("./test_database.db")
+    # --- TEARDOWN: Clean up the test database ---
+    os.remove(db_path)
 
 # --- API Endpoint Tests (These require a small update for the new data) ---
 
