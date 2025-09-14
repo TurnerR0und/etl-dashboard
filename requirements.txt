@@ -10,3 +10,4 @@ pytest
 cachetools
 redis
 httpx
+xlrd
