@@ -11,3 +11,4 @@ cachetools
 redis
 httpx
 xlrd
+openpyxl

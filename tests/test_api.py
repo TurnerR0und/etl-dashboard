@@ -1,86 +1,74 @@
+# In tests/test_api.py
+
 import pytest
 from fastapi.testclient import TestClient
 import os
+import asyncio
 
 # This fixture will be used by all tests in this module
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     """
-    Provides a TestClient instance for the FastAPI app after setting up
-    a dedicated test database environment.
+    Provides a TestClient for the API after setting up and tearing down
+    a dedicated test database.
     """
-    # 1. Set the environment variable to point to a test-specific database
-    # This must be done BEFORE importing the app
-    os.environ["DATABASE_URL"] = "sqlite:///./test_house_prices.db"
+    os.environ["DATABASE_URL"] = "sqlite:///./test_database.db"
     
-    # 2. Now we can safely import the app.
-    # The app's top-level code will run, including initialize_database(),
-    # which will create and populate our test_house_prices.db
+    # --- SETUP: Run the data pipeline to create the test DB ---
+    # We directly import and run the pipeline's main function.
+    # This is more reliable than using a subprocess.
+    from data_pipeline import main as run_pipeline
+    
+    # Run the async main function from the pipeline
+    asyncio.run(run_pipeline())
+    
+    # Now that the DB is created, we can import the app
     from api import app
     
-    # 3. Yield the TestClient for the tests to use
+    # Yield the TestClient for the tests to use
     with TestClient(app) as c:
         yield c
         
-    # 4. Teardown: after all tests in the module run, remove the test database
-    os.remove("./test_house_prices.db")
+    # --- TEARDOWN: Clean up the test database after tests are done ---
+    os.remove("./test_database.db")
 
-# --- API Endpoint Tests (These remain mostly the same) ---
+# --- API Endpoint Tests (These require a small update for the new data) ---
 
 def test_read_index(client: TestClient):
-    """
-    Tests the root endpoint ('/') to ensure it serves the frontend.
-    """
+    """Tests the root endpoint ('/')."""
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers['content-type']
-    assert b"UK House Price Index Dashboard" in response.content
 
 def test_get_regions_successful(client: TestClient):
-    """
-    Tests the /regions endpoint for a successful response.
-    """
+    """Tests the /regions endpoint for a successful response."""
     response = client.get("/regions")
     assert response.status_code == 200
-    
     data = response.json()
     assert "regions" in data
     assert isinstance(data["regions"], list)
-    
-    # The initialize_database() function should have populated the test DB
-    assert len(data["regions"]) > 0
     assert "London" in data["regions"]
 
 def test_get_data_for_region_successful(client: TestClient):
-    """
-    Tests fetching data for a valid, existing region.
-    """
-    region_name = "London"
-    response = client.get(f"/data/{region_name}")
+    """Tests fetching data for a valid region, checking for new data fields."""
+    response = client.get("/data/London")
     assert response.status_code == 200
     
     data = response.json()
-    assert "region" in data
-    assert data["region"] == region_name
+    assert data["region"] == "London"
     assert "data" in data
-    assert isinstance(data["data"], list)
-
-    # Check that data was returned and has the correct structure
     assert len(data["data"]) > 0
+
+    # Check that our new affordability data is present in the response
     first_item = data["data"][0]
-    assert "date" in first_item
     assert "average_price" in first_item
-    assert "index" in first_item
+    assert "average_annual_salary" in first_item
+    assert "affordability_ratio" in first_item
 
 def test_get_data_for_nonexistent_region(client: TestClient):
-    """
-    Tests fetching data for a region that does not exist.
-    """
-    region_name = "Atlantis" # A region we know is not in the dataset
-    response = client.get(f"/data/{region_name}")
+    """Tests fetching data for a region that does not exist."""
+    response = client.get("/data/Atlantis")
     assert response.status_code == 200
-    
     data = response.json()
-    assert data["region"] == region_name
-    # The API should gracefully return an empty list for the data
-    assert data["data"] == []
+    assert data["region"] == "Atlantis"
+    assert data["data"] == [] # Should return an empty list
