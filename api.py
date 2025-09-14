@@ -1,5 +1,6 @@
 import os
 import subprocess
+import json
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse
@@ -124,7 +125,6 @@ def get_regions():
         cached_regions = redis_client.get("regions")
         if cached_regions:
             log.info("CACHE HIT: Returning regions from Redis.")
-            import json
             return json.loads(cached_regions)
 
     log.info("CACHE MISS: Fetching regions from database.")
@@ -141,7 +141,6 @@ def get_regions():
 
         if CACHE_ENABLED:
             # Store result in Redis cache with an expiration of 1 hour (3600 seconds)
-            import json
             redis_client.set("regions", json.dumps(response_data), ex=3600)
         
         return response_data
@@ -187,7 +186,6 @@ def get_data_for_region(region_name: str):
         response_data = {"region": region_name, "data": data}
         
         if CACHE_ENABLED:
-            import json
             redis_client.set(cache_key, json.dumps(response_data), ex=3600)
             
         return response_data
