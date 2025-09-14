@@ -72,7 +72,7 @@ def initialize_database():
 
 
 # Run the initialization on startup
-initialize_database()
+# initialize_database()
 
 # --- FastAPI Application ---
 app = FastAPI(
@@ -172,7 +172,12 @@ def get_data_for_region(region_name: str):
         date_format_sql = "TO_CHAR(date, 'YYYY-MM-DD')"
 
     query = text(f"""
-        SELECT {date_format_sql} as date, average_price, "index"
+        SELECT 
+            {date_format_sql} as date, 
+            average_price, 
+            "index",
+            average_annual_salary,
+            affordability_ratio
         FROM {TABLE_NAME}
         WHERE region_name = :region
         ORDER BY date
