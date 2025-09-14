@@ -56,13 +56,24 @@ def clean_house_price_data(content: bytes) -> pd.DataFrame | None:
     log.info("House price data cleaned.")
     return df
 
+# In data_pipeline.py
+
 def clean_salary_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw salary Excel content."""
     if content is None: return None
     log.info("Cleaning salary data from Excel file...")
+    # Read the excel file, skipping the messy header
     df = pd.read_excel(io.BytesIO(content), sheet_name='All', header=5)
     
-    df = df[['Region', '2025']].rename(columns={'Region': 'region_name', '2025': 'weekly_pay'})
+    # --- START OF THE FIX ---
+    # Select the first two columns by their position (iloc) instead of by name.
+    # This is much more robust to changes in column naming from the source.
+    df = df.iloc[:, [0, 1]]
+    
+    # Assign our own stable column names.
+    df.columns = ['region_name', 'weekly_pay']
+    # --- END OF THE FIX ---
+    
     df.dropna(subset=['region_name', 'weekly_pay'], inplace=True)
 
     df['year'] = 2025
