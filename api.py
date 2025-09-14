@@ -154,17 +154,29 @@ def get_data_for_region(region_name: str):
             return json.loads(cached_data)
 
     print(f"CACHE MISS: Fetching data for {region_name} from database.")
-    # ... (the rest of the function is the same, but the caching part changes)
+    
     engine = db_connection()
     if not engine:
         return {"error": "Database connection failed"}
+
+    # --- START OF THE FIX ---
+    # Dynamically choose the date formatting function based on the database dialect
+    if engine.dialect.name == "sqlite":
+        # SQLite uses STRFTIME
+        date_format_sql = "STRFTIME('%Y-%m-%d', date)"
+    else:
+        # PostgreSQL (and many others) use TO_CHAR
+        date_format_sql = "TO_CHAR(date, 'YYYY-MM-DD')"
+
+    query = text(f"""
+        SELECT {date_format_sql} as date, average_price, "index"
+        FROM {TABLE_NAME}
+        WHERE region_name = :region
+        ORDER BY date
+    """)
+    # --- END OF THE FIX ---
+
     with engine.connect() as conn:
-        query = text(f"""
-            SELECT TO_CHAR(date, 'YYYY-MM-DD') as date, average_price, "index"
-            FROM {TABLE_NAME}
-            WHERE region_name = :region
-            ORDER BY date
-        """)
         result = conn.execute(query, {"region": region_name})
         data = [dict(row._mapping) for row in result]
         
