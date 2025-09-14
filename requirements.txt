@@ -9,3 +9,4 @@ pydantic
 pytest
 cachetools
 redis
+httpx

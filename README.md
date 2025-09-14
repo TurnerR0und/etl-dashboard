@@ -11,62 +11,116 @@ pinned: false
 
 # Python ETL + Dashboard Demo
 
-This project is a complete, end-to-end data pipeline demonstration. It showcases a real-world workflow where data is **extracted, cleaned, served via an API, visualized on a dashboard, and automatically tested and deployed**.
+End‑to‑end demo that fetches UK House Price Index data, cleans and validates it, loads it into PostgreSQL, serves it via a FastAPI backend, and visualizes it in a browser dashboard. The repo includes automated tests and CI/CD that deploys to Hugging Face Spaces (Docker runtime).
 
-## 🚀 Key Features
+## 🚀 Features
 
-- **ETL Pipeline**: A Python script using `pandas` and `requests` to fetch UK House Price Index data, clean it, and load it into a SQLite database.  
-- **FastAPI Backend**: A robust API built with FastAPI that serves the cleaned data from the database.  
-- **Interactive Frontend**: A single-page dashboard built with HTML, Tailwind CSS, and Chart.js that visualizes the housing data.  
-- **CI/CD Automation**: A GitHub Actions workflow that automatically tests the data pipeline on every push.  
-- **Dockerized Deployment**: The entire application is containerized with Docker and is set up for automated deployment to Hugging Face Spaces.  
-
-This repository is a portfolio piece demonstrating skills in **Python, data engineering, API development, frontend visualization, and DevOps practices**.
+- **ETL Pipeline**: `pandas` + `requests` pipeline that downloads the official UK HPI CSV, selects/renames columns, coerces dates, drops invalid rows, and validates rows with `pydantic` before loading to the database.
+- **PostgreSQL Storage**: Data is written to a PostgreSQL table via SQLAlchemy using `DATABASE_URL`.
+- **FastAPI Backend**: Two endpoints: `/regions` (distinct region list) and `/data/{region}` (time series). Uses SQL for efficient retrieval.
+- **Response Caching**: In‑memory TTL caches (via `cachetools.TTLCache`) for regions and per‑region results to reduce DB round‑trips in the Space container.
+- **Interactive Dashboard**: Single page `index.html` (Tailwind CSS + Chart.js) that calls the API and renders charts.
+- **Testing with Pytest**: Unit tests for the data cleaning behavior (`tests/test_pipeline.py`).
+- **CI/CD**: GitHub Actions runs tests, then deploys to a Hugging Face Space via a protected push from `main`.
+- **Dockerized**: The Space uses the `Dockerfile` to build and run `uvicorn` with `api.py`.
 
 ---
 
-## 🛠 How to Run Locally
+## 🧰 Tech Stack
 
-Clone the repository:
+- Python 3.10, pandas, requests, SQLAlchemy, pydantic
+- FastAPI, Uvicorn
+- cachetools (TTL caches for responses)
+- Pytest for tests
+- GitHub Actions for CI/CD
+- Docker runtime on Hugging Face Spaces
+
+---
+
+## 🛠 Local Development
+
+1) Clone and create a virtualenv
 
 ```bash
 git clone https://github.com/TurnerR0und/etl-dashboard.git
 cd etl-dashboard
-```
-
-Create and activate a virtual environment:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-Install the required dependencies:
-
-```bash
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run the data pipeline to generate the database:
+2) Configure environment
+
+Create a `.env` file with your PostgreSQL URL:
+
+```env
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+```
+
+3) Run the ETL
 
 ```bash
 python3 data_pipeline.py
 ```
 
-Start the API server:
+4) Launch the API
 
 ```bash
 uvicorn api:app --reload
 ```
 
-The server will be running at: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+Visit `http://127.0.0.1:8000/` to load the dashboard.
 
-Open the dashboard:
-- Run the API and open `http://127.0.0.1:8000/` (the server serves the dashboard at `/`).
+---
 
-Note on configuration:
-- The SQLite database path is controlled via the `DB_FILE` environment variable. Defaults to `house_prices.db` for local dev.
-- On Hugging Face Spaces (Docker), the image sets `DB_FILE=/data/house_prices.db` so data persists and the path is writable.
+## 📡 API Overview
+
+- `/` – Serves `index.html` (dashboard)
+- `/regions` – Returns `{ "regions": ["London", ...] }`
+- `/data/{region}` – Returns `{ "region": "London", "data": [{"date": "YYYY-MM-DD", "average_price": ..., "index": ...}, ...] }`
+
+Notes:
+- The API initializes by running the ETL on startup if `DATABASE_URL` is present (see `initialize_database()` in `api.py`).
+- CORS is open for GET requests to support the static dashboard.
+- Responses are cached for one hour (configurable TTLs) inside the container.
+
+---
+
+## ✅ Testing
+
+Run tests locally:
+
+```bash
+pytest -q
+```
+
+What is tested:
+- Column selection and renaming
+- Date parsing (invalid dates dropped)
+- Null handling in critical fields
+
+---
+
+## 🚀 Deploying to Hugging Face Spaces
+
+This repository is configured for Spaces with a Docker runtime. The required front‑matter at the top of this file is preserved. CI deploys by pushing `main` to the Space’s Git repository.
+
+What you need:
+- A Space (Docker SDK) created under your account.
+- HF token stored as GitHub secret `HF_TOKEN`.
+- A PostgreSQL instance reachable from the Space and a `DATABASE_URL` configured in the Space’s Secrets (recommended) or injected by CI for integration checks.
+
+How it works:
+- GitHub Actions workflow `.github/workflows/main.yml` runs on pushes to `main`.
+- Job 1: installs deps, runs `pytest`, and runs the ETL (integration check) using `${{ secrets.DATABASE_URL }}` if provided.
+- Job 2 (deploy): checks out `main` with full history and pushes to the Space remote using the HF token.
+
+Docker entrypoint:
+- The Dockerfile installs dependencies and starts `uvicorn` on port `7860`.
+- On container boot, `api.py` calls the pipeline once to ensure the DB has data (requires `DATABASE_URL`).
+
+Recommended Space settings:
+- Add a Secret named `DATABASE_URL` in your Space so the container can connect at runtime.
+- Hardware: CPU is sufficient for this demo.
 
 ---
 
@@ -76,21 +130,36 @@ Note on configuration:
 .
 ├── .github/
 │   └── workflows/
-│       └── main.yml      # GitHub Actions workflow for CI/CD
-├── .gitignore            # Specifies files for Git to ignore
-├── Dockerfile            # Instructions for building the Docker container
-├── README.md             # This file
-├── PROJECT_PLAN.md       # Step-by-step development instructions
-├── api.py                # FastAPI application to serve data and the frontend
-├── data_pipeline.py      # Python script for the ETL process
-├── house_prices.db       # SQLite database (generated by the pipeline)
-├── index.html            # Frontend dashboard file
-└── requirements.txt      # Python dependencies
+│       └── main.yml          # CI: tests + deploy to Space
+├── api.py                    # FastAPI app and startup ETL
+├── data_pipeline.py          # Extract/Clean/Validate/Load pipeline
+├── index.html                # Dashboard UI (Tailwind + Chart.js)
+├── tests/
+│   └── test_pipeline.py      # Pytest unit tests
+├── pytest.ini                # Pytest config (adds repo to PYTHONPATH)
+├── Dockerfile                # Space build (Docker runtime)
+├── requirements.txt          # Runtime dependencies (incl. pytest for CI)
+├── .env                      # Local env vars (not committed)
+└── README.md                 # This file
 ```
 
 ---
 
-## 📌 Notes
+## 🔧 Configuration Notes
+
+- Set `DATABASE_URL` for both local dev and the Space runtime. Without it, the ETL/API will skip DB work.
+- Response cache TTLs are set to 1 hour for regions and per‑region data; adjust in `api.py` if needed.
+- The ETL downloads the latest published CSV from the UK Land Registry; network access is required when running the pipeline.
+
+---
+
+## 📌 Roadmap Ideas
+
+- Add API tests and contract tests in CI
+- Parameterize the data URL and refresh schedule
+- Optional Redis cache for multi‑replica deployments
+- Pagination and filtering for large regions
+- Basic rate‑limit/middleware for public endpoints
 
 - Designed as a **portfolio-ready project** to showcase ETL, API, and dashboard integration.  
 - Built with simplicity in mind so the pipeline and deployment steps are clear.  
