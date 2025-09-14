@@ -26,14 +26,20 @@ def raw_salary_content() -> bytes:
     }
     df = pd.DataFrame(data)
 
-    # Simulate an in-memory Excel file, including the junk header rows
+    # Simulate an in-memory Excel file
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlrd') as writer:
-        # Write dummy header content
-        writer.book.add_sheet('All')
-        writer.sheets['All'].write(0, 0, 'Title of Document')
-        # Write the actual data, starting at row 5 (header=5 in the cleaning function)
+    
+    # --- START OF THE FIX ---
+    # Use pd.ExcelWriter and explicitly specify the 'openpyxl' engine for writing.
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Write some dummy header content to simulate the real file's structure
+        # This ensures our cleaning function's header=5 logic is tested correctly.
+        dummy_header = pd.DataFrame(['Title of Document'])
+        dummy_header.to_excel(writer, sheet_name='All', index=False, header=False)
+        
+        # Write the actual data, starting at row 5
         df.to_excel(writer, sheet_name='All', index=False, startrow=5)
+    # --- END OF THE FIX ---
     
     output.seek(0)
     return output.getvalue()
