@@ -1,12 +1,10 @@
-# In tests/test_api.py
-
 import pytest
 from fastapi.testclient import TestClient
 import os
 import asyncio
+from logger_config import log # Import log for better test setup visibility
 
-# This fixture will be used by all tests in this module
-@pytest.fixture(scope="module")
+# This is the single, correct fixture decorator
 @pytest.fixture(scope="module")
 def client() -> TestClient:
     """
@@ -23,7 +21,7 @@ def client() -> TestClient:
         asyncio.run(run_pipeline())
         log.info("Test setup: Data pipeline finished successfully.")
     except Exception as e:
-        # If the pipeline fails for any reason, fail the test suite with a clear error
+        # If the pipeline fails, fail the test suite with a clear error
         pytest.fail(f"Data pipeline failed during test setup: {e}", pytrace=True)
 
     # Now that the DB is created, we can import the app
@@ -33,9 +31,10 @@ def client() -> TestClient:
         yield c
         
     # --- TEARDOWN: Clean up the test database ---
+    log.info(f"Test teardown: Removing test database at {db_path}")
     os.remove(db_path)
 
-# --- API Endpoint Tests (These require a small update for the new data) ---
+# --- API Endpoint Tests ---
 
 def test_read_index(client: TestClient):
     """Tests the root endpoint ('/')."""
@@ -50,10 +49,11 @@ def test_get_regions_successful(client: TestClient):
     data = response.json()
     assert "regions" in data
     assert isinstance(data["regions"], list)
+    assert len(data["regions"]) > 0
     assert "London" in data["regions"]
 
 def test_get_data_for_region_successful(client: TestClient):
-    """Tests fetching data for a valid region, checking for new data fields."""
+    """Tests fetching data for a valid region, checking for new affordability data."""
     response = client.get("/data/London")
     assert response.status_code == 200
     
@@ -62,7 +62,6 @@ def test_get_data_for_region_successful(client: TestClient):
     assert "data" in data
     assert len(data["data"]) > 0
 
-    # Check that our new affordability data is present in the response
     first_item = data["data"][0]
     assert "average_price" in first_item
     assert "average_annual_salary" in first_item
@@ -74,4 +73,4 @@ def test_get_data_for_nonexistent_region(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert data["region"] == "Atlantis"
-    assert data["data"] == [] # Should return an empty list
+    assert data["data"] == []
