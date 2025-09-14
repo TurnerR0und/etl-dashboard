@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import redis
+from logger_config import log 
 #from cachetools import TTLCache # <-- Import TTLCache
 
 # Load environment variables from .env file for local development
@@ -58,15 +59,16 @@ def initialize_database():
     This ensures the data is always fresh when the container starts.
     """
     if not DATABASE_URL:
-        print("FATAL: DATABASE_URL not set. Cannot initialize database.")
+        log.critical("FATAL: DATABASE_URL not set. Cannot initialize database.")
         return
 
-    print("Running ETL pipeline to create/update database...")
+    log.info("Running ETL pipeline to create/update database...")
     try:
         subprocess.run(["python3", "data_pipeline.py"], check=True)
-        print("ETL pipeline completed successfully.")
+        log.info("ETL pipeline completed successfully.")
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"FATAL: Error running ETL pipeline: {e}")
+        log.critical(f"FATAL: Error running ETL pipeline: {e}")
+
 
 # Run the initialization on startup
 initialize_database()
@@ -91,11 +93,14 @@ app.add_middleware(
 def db_connection():
     """Establishes a SQLAlchemy engine connection to the database."""
     if not DATABASE_URL:
+        # This case is already handled by initialize_database, 
+        # but it's good practice to keep the check.
         return None
     try:
         return create_engine(DATABASE_URL)
     except Exception as e:
-        print(f"Error creating database engine: {e}")
+        # Log the specific exception that occurred at an ERROR level
+        log.error(f"Error creating database engine: {e}")
         return None
 
 # --- API Endpoints ---
@@ -118,11 +123,11 @@ def get_regions():
         # Check cache first
         cached_regions = redis_client.get("regions")
         if cached_regions:
-            print("CACHE HIT: Returning regions from Redis.")
+            log.info("CACHE HIT: Returning regions from Redis.")
             import json
             return json.loads(cached_regions)
 
-    print("CACHE MISS: Fetching regions from database.")
+    log.info("CACHE MISS: Fetching regions from database.")
     # ... (the rest of the function is the same, but the caching part changes)
     engine = db_connection()
     if not engine:
@@ -149,11 +154,10 @@ def get_data_for_region(region_name: str):
     if CACHE_ENABLED:
         cached_data = redis_client.get(cache_key)
         if cached_data:
-            print(f"CACHE HIT: Returning data for {region_name} from Redis.")
-            import json
+            log.info(f"CACHE HIT: Returning data for {region_name} from Redis.")
             return json.loads(cached_data)
 
-    print(f"CACHE MISS: Fetching data for {region_name} from database.")
+    log.info(f"CACHE MISS: Fetching data for {region_name} from database.")
     
     engine = db_connection()
     if not engine:

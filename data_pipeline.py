@@ -1,3 +1,4 @@
+# In data_pipeline.py
 import os
 import io
 import pandas as pd
@@ -6,6 +7,7 @@ from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 from datetime import date
+from logger_config import log # <-- Import the logger
 
 # Load environment variables from .env file for local development
 load_dotenv()
@@ -27,53 +29,48 @@ class HPIModel(BaseModel):
 
 def fetch_data(url: str) -> pd.DataFrame:
     """Fetches CSV data from a URL and returns it as a pandas DataFrame."""
-    print(f"Fetching data from {url}...")
+    log.info(f"Fetching data from {url}...")
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print("Data fetched successfully.")
+        log.info("Data fetched successfully.")
         csv_content = io.StringIO(response.text)
         return pd.read_csv(csv_content)
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching data: {e}")
+        log.error(f"Error fetching data: {e}")
         return None
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """Cleans and transforms the raw DataFrame."""
     if df is None: return None
-    print("Cleaning data...")
+    log.info("Cleaning data...")
     df = df[['Date', 'RegionName', 'AveragePrice', 'Index']].rename(columns={
         'Date': 'date',
         'RegionName': 'region_name',
         'AveragePrice': 'average_price',
         'Index': 'index'
     })
-    # Convert 'date' column to datetime objects, coercing errors to NaT (Not a Time)
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    # Drop rows where critical data is missing
     df.dropna(subset=['date', 'region_name', 'average_price', 'index'], inplace=True)
-    print("Data cleaned and columns selected.")
+    log.info("Data cleaned and columns selected.")
     return df
 
 def validate_data(df: pd.DataFrame) -> pd.DataFrame:
     """Validates the DataFrame against the Pydantic model."""
     if df is None: return None
-    print("Validating data...")
+    log.info("Validating data...")
     validated_rows = []
     error_count = 0
     for index, row in df.iterrows():
         try:
-            # Pydantic automatically converts the pandas timestamp to a date object
             validated_rows.append(HPIModel(**row.to_dict()).model_dump())
-        except ValidationError as e:
-            # Log the error for the specific row but continue processing
-            # print(f"Validation error on row {index}: {e.errors()}")
+        except ValidationError:
             error_count += 1
     
     if error_count > 0:
-        print(f"Validation complete. Found {error_count} invalid rows (not loaded).")
+        log.warning(f"Validation complete. Found {error_count} invalid rows (not loaded).")
     else:
-        print("Validation successful. All rows are valid.")
+        log.info("Validation successful. All rows are valid.")
 
     return pd.DataFrame(validated_rows)
 
@@ -81,40 +78,22 @@ def validate_data(df: pd.DataFrame) -> pd.DataFrame:
 def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str):
     """Loads a DataFrame into a PostgreSQL database table."""
     if df is None or df.empty or not db_url:
-        print("Data loading skipped due to missing/empty DataFrame or database URL.")
+        log.warning("Data loading skipped due to missing/empty DataFrame or database URL.")
         return
-    print(f"Loading {len(df)} validated rows into database table '{table_name}'...")
+    log.info(f"Loading {len(df)} validated rows into database table '{table_name}'...")
     try:
         engine = create_engine(db_url)
         df.to_sql(table_name, engine, if_exists='replace', index=False)
-        print("Data loaded successfully.")
+        log.info("Data loaded successfully.")
     except Exception as e:
-        print(f"Error loading data to database: {e}")
+        log.error(f"Error loading data to database: {e}")
 
-def clear_api_cache():
-    """Sends a request to the running API to clear its cache."""
-    api_url = os.environ.get("API_URL")
-    api_secret_token = os.environ.get("API_SECRET_TOKEN")
-
-    if not api_url or not api_secret_token:
-        print("API_URL or API_SECRET_TOKEN not set. Skipping cache clearing.")
-        return
-
-    endpoint = f"{api_url.rstrip('/')}/admin/clear-cache"
-    headers = {"X-API-KEY": api_secret_token}
-    
-    try:
-        print(f"Attempting to clear API cache at {endpoint}...")
-        response = requests.post(endpoint, headers=headers)
-        response.raise_for_status() # Raises an exception for bad status codes (4xx or 5xx)
-        print("API cache cleared successfully.")
-    except requests.exceptions.RequestException as e:
-        print(f"Error clearing API cache: {e}")
+# ... (clear_api_cache function remains the same)
 
 def main():
     """Main function to run the ETL pipeline."""
     if not DATABASE_URL:
-        print("FATAL: DATABASE_URL environment variable not set. Aborting.")
+        log.critical("FATAL: DATABASE_URL environment variable not set. Aborting.")
         return
 
     raw_data_df = fetch_data(DATA_URL)
@@ -122,9 +101,5 @@ def main():
     validated_df = validate_data(cleaned_df)
     load_data_to_db(validated_df, DATABASE_URL, TABLE_NAME)
 
-    # After loading data, clear the cache
-    # clear_api_cache() # Not needed during initial load on startup
-
 if __name__ == "__main__":
     main()
-
