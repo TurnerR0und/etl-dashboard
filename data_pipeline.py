@@ -1,74 +1,141 @@
-# In tests/test_api.py
-
-import pytest
-from fastapi.testclient import TestClient
 import os
+import io
+import pandas as pd
+import httpx
 import asyncio
+from sqlalchemy import create_engine
+from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError, Field
+from datetime import date
+from logger_config import log
 
-# This fixture will be used by all tests in this module
-@pytest.fixture(scope="module")
-def client() -> TestClient:
-    """
-    Provides a TestClient for the API after reliably setting up and tearing down
-    a dedicated test database.
-    """
-    # 1. Set the environment variable for the test database
-    os.environ["DATABASE_URL"] = "sqlite:///./test_api_database.db"
+# Load environment variables
+load_dotenv()
+
+# --- Configuration ---
+HPI_DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
+SALARY_DATA_URL = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/grossweeklyearningsoffulltimeemployeesbyregionearn05/current/earn05aug2025.xls"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+TABLE_NAME = "uk_hpi_plus_affordability"
+
+# --- Pydantic Data Validation Model ---
+class AffordabilityModel(BaseModel):
+    date: date
+    region_name: str
+    average_price: float
+    index: float
+    average_annual_salary: float | None = Field(default=None)
+    affordability_ratio: float | None = Field(default=None)
+
+# --- ETL Functions ---
+
+async def fetch_data(session: httpx.AsyncClient, url: str, data_name: str) -> bytes | None:
+    """Fetches raw content (bytes) asynchronously from a URL."""
+    log.info(f"Fetching {data_name} data from {url}...")
+    try:
+        response = await session.get(url, timeout=60.0, follow_redirects=True)
+        response.raise_for_status()
+        log.info(f"{data_name} data fetched successfully.")
+        return response.content
+    except httpx.RequestError as e:
+        log.error(f"Error fetching {data_name} data: {e}")
+        return None
+
+def clean_house_price_data(content: bytes) -> pd.DataFrame | None:
+    """Cleans and transforms the raw house price CSV content."""
+    if content is None: return None
+    log.info("Cleaning house price data...")
+    df = pd.read_csv(io.BytesIO(content))
+    df = df[['Date', 'RegionName', 'AveragePrice', 'Index']].rename(columns={
+        'Date': 'date', 'RegionName': 'region_name',
+        'AveragePrice': 'average_price', 'Index': 'index'
+    })
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df.dropna(subset=['date', 'region_name', 'average_price', 'index'], inplace=True)
+    df['year'] = df['date'].dt.year
+    log.info("House price data cleaned.")
+    return df
+
+def clean_salary_data(content: bytes) -> pd.DataFrame | None:
+    """Cleans and transforms the raw salary Excel content."""
+    if content is None: return None
+    log.info("Cleaning salary data from Excel file...")
+    df = pd.read_excel(io.BytesIO(content), sheet_name='All', header=5)
     
-    # 2. Directly import and run the data pipeline's main function.
-    # This is the most reliable way to ensure the test DB is created and populated.
-    from data_pipeline import main as run_pipeline
+    df = df[['Region', '2025']].rename(columns={'Region': 'region_name', '2025': 'weekly_pay'})
+    df.dropna(subset=['region_name', 'weekly_pay'], inplace=True)
+
+    df['year'] = 2025
+    df['weekly_pay'] = pd.to_numeric(df['weekly_pay'], errors='coerce')
+    df.dropna(inplace=True)
+
+    df['average_annual_salary'] = df['weekly_pay'] * 52
     
-    # Run the async main function from the pipeline
-    asyncio.run(run_pipeline())
+    region_mapping = {'East': 'East of England'}
+    df['region_name'] = df['region_name'].replace(region_mapping)
+    log.info("Salary data cleaned.")
+    return df[['year', 'region_name', 'average_annual_salary']]
+
+def merge_and_transform_data(prices_df: pd.DataFrame, salaries_df: pd.DataFrame) -> pd.DataFrame | None:
+    """Merges the two dataframes and calculates the affordability ratio."""
+    if prices_df is None or salaries_df is None: return None
+    log.info("Merging house price and salary data...")
+    merged_df = pd.merge(prices_df, salaries_df, on=['year', 'region_name'], how='left')
+    merged_df['affordability_ratio'] = merged_df['average_price'] / merged_df['average_annual_salary']
+    log.info("Data merged and affordability ratio calculated.")
+    return merged_df
+
+def validate_data(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None: return None
+    log.info("Validating final merged data...")
+    validated_rows = []
+    error_count = 0
+    for _, row in df.iterrows():
+        try:
+            validated_rows.append(AffordabilityModel(**row.to_dict()).model_dump())
+        except ValidationError:
+            error_count += 1
     
-    # 3. Now that the DB exists, we can safely import the app
-    from api import app
+    if error_count > 0:
+        log.warning(f"Validation complete. Found {error_count} invalid rows.")
+    else:
+        log.info("Validation successful. All rows are valid.")
     
-    # 4. Yield the TestClient for the tests to use
-    with TestClient(app) as c:
-        yield c
-        
-    # 5. Teardown: Clean up the test database after all tests are done
-    os.remove("./test_api_database.db")
+    final_cols = list(AffordabilityModel.model_fields.keys())
+    return pd.DataFrame(validated_rows)[final_cols]
 
-# --- API Endpoint Tests (Now updated to check for new data) ---
 
-def test_read_index(client: TestClient):
-    """Tests the root endpoint ('/')."""
-    response = client.get("/")
-    assert response.status_code == 200
-    assert "text/html" in response.headers['content-type']
+def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str):
+    if df is None or df.empty or not db_url:
+        log.warning("Data loading skipped.")
+        return
+    log.info(f"Loading {len(df)} rows into table '{table_name}'...")
+    try:
+        engine = create_engine(db_url)
+        df.to_sql(table_name, engine, if_exists='replace', index=False)
+        log.info("Data loaded successfully.")
+    except Exception as e:
+        log.error(f"Error loading data to database: {e}")
 
-def test_get_regions_successful(client: TestClient):
-    """Tests the /regions endpoint for a successful response."""
-    response = client.get("/regions")
-    assert response.status_code == 200
-    data = response.json()
-    assert "regions" in data
-    assert isinstance(data["regions"], list)
-    assert "London" in data["regions"]
+async def main():
+    """Main function to run the full ETL pipeline."""
+    if not DATABASE_URL:
+        log.critical("FATAL: DATABASE_URL not set. Aborting.")
+        return
 
-def test_get_data_for_region_successful(client: TestClient):
-    """Tests fetching data for a valid region, checking for new affordability data."""
-    response = client.get("/data/London")
-    assert response.status_code == 200
+    async with httpx.AsyncClient() as session:
+        hpi_task = fetch_data(session, HPI_DATA_URL, "house price")
+        salary_task = fetch_data(session, SALARY_DATA_URL, "salary")
+        raw_hpi_content, raw_salary_content = await asyncio.gather(hpi_task, salary_task)
     
-    data = response.json()
-    assert data["region"] == "London"
-    assert "data" in data
-    assert len(data["data"]) > 0
+    cleaned_hpi_df = clean_house_price_data(raw_hpi_content)
+    cleaned_salary_df = clean_salary_data(raw_salary_content)
+    
+    merged_df = merge_and_transform_data(cleaned_hpi_df, cleaned_salary_df)
+    
+    validated_df = validate_data(merged_df)
+    
+    load_data_to_db(validated_df, DATABASE_URL, TABLE_NAME)
 
-    # Verify that our new, merged data is present in the API response
-    first_item = data["data"][0]
-    assert "average_price" in first_item
-    assert "average_annual_salary" in first_item
-    assert "affordability_ratio" in first_item
-
-def test_get_data_for_nonexistent_region(client: TestClient):
-    """Tests fetching data for a region that does not exist."""
-    response = client.get("/data/Atlantis")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["region"] == "Atlantis"
-    assert data["data"] == [] # The API should gracefully return an empty list
+if __name__ == "__main__":
+    asyncio.run(main())
