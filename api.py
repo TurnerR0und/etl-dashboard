@@ -16,7 +16,7 @@ load_dotenv()
 
 # --- Configuration ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
-TABLE_NAME = "uk_hpi"
+TABLE_NAME = "uk_hpi_plus_affordability"
 API_SECRET_TOKEN = os.environ.get("API_SECRET_TOKEN") # <-- Add this for security
 # New Redis Configuration
 REDIS_URL = os.environ.get("REDIS_URL") # <-- Add this
