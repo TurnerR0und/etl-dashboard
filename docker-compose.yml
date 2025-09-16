@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    # This assumes your Docker image is named this on Docker Hub
+    image: turnerr0und/etl-dashboard:latest 
+    container_name: etl_app
+    restart: unless-stopped
+    # The .env_file directive tells Compose to load variables from a file named .env
+    env_file:
+      - .env
+    ports:
+      # Maps port 8000 on the VPS to port 7860 inside the container
+      - "8000:7860"
