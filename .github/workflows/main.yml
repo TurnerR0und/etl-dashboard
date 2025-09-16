@@ -46,7 +46,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/etl-dashboard:latest # Use your Docker Hub username here
+          tags: turnerr0und/etl-dashboard:latest # I've updated this to your username
 
       - name: Deploy to VPS
         uses: appleboy/ssh-action@master
@@ -54,24 +54,23 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-          passphrase: ${{ secrets.VPS_SSH_PASSPHRASE }} # <-- Add this line
+          passphrase: ${{ secrets.VPS_SSH_PASSPHRASE }} # Keep this if you're using a passphrase
           script: |
-            # Clone the repo if it doesn't exist
+            # Navigate to the app directory, cloning it if it doesn't exist
             if [ ! -d "~/etl-dashboard" ]; then
               git clone https://github.com/${{ github.repository }}.git ~/etl-dashboard
+              cd ~/etl-dashboard
+            else
+              cd ~/etl-dashboard
+              # Pull the latest changes from the main branch
+              git pull origin main
             fi
-            
-            cd ~/etl-dashboard
             
             # Create the .env file on the server with your secrets
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
             echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> .env
             echo "API_SECRET_TOKEN=${{ secrets.API_SECRET_TOKEN }}" >> .env
             
-            # Copy the latest docker-compose.yml from your repo
-            # (This assumes the action checks out the repo on the remote machine)
-            cp docker-compose.yml ~/etl-dashboard/docker-compose.yml
-
-            # Pull the latest image from Docker Hub and restart the service
-            docker-compose pull
-            docker-compose up -d --force-recreate
+            # Use the modern 'docker compose' command
+            docker compose pull
+            docker compose up -d --force-recreate
