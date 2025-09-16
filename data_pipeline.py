@@ -23,15 +23,15 @@ def fallback_house_price_data() -> pd.DataFrame:
     """Provides a minimal, static dataset when remote downloads fail."""
     log.warning("Falling back to bundled house price sample dataset.")
     data = pd.DataFrame([
-        {"date": "2025-01-01", "region_name": "London", "average_price": 525000.0, "index": 120.5},
-        {"date": "2025-02-01", "region_name": "London", "average_price": 527500.0, "index": 121.1},
-        {"date": "2025-01-01", "region_name": "North West", "average_price": 210000.0, "index": 109.3},
-        {"date": "2025-02-01", "region_name": "North West", "average_price": 212000.0, "index": 109.9},
+        {"date": "2025-01-01", "parent_region": "London", "region_name": "London", "average_price": 525000.0, "index": 120.5},
+        {"date": "2025-02-01", "parent_region": "London", "region_name": "London", "average_price": 527500.0, "index": 121.1},
+        {"date": "2025-01-01", "parent_region": "North West", "region_name": "North West", "average_price": 210000.0, "index": 109.3},
+        {"date": "2025-02-01", "parent_region": "North West", "region_name": "North West", "average_price": 212000.0, "index": 109.9},
     ])
     data["date"] = pd.to_datetime(data["date"], errors="coerce")
     data.dropna(subset=["date"], inplace=True)
     data["year"] = data["date"].dt.year
-    return data[["date", "region_name", "average_price", "index", "year"]]
+    return data
 
 
 def fallback_salary_data() -> pd.DataFrame:
@@ -71,129 +71,93 @@ def clean_house_price_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw house price CSV content."""
     if content is None: return None
     log.info("Cleaning house price data...")
-    df = pd.read_csv(io.BytesIO(content))
-    df = df[['Date', 'RegionName', 'AveragePrice', 'Index']].rename(columns={
-        'Date': 'date', 'RegionName': 'region_name',
-        'AveragePrice': 'average_price', 'Index': 'index'
-    })
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    df.dropna(subset=['date', 'region_name', 'average_price', 'index'], inplace=True)
-    df['year'] = df['date'].dt.year
-    log.info("House price data cleaned.")
-    return df
-
-# In data_pipeline.py
+    try:
+        df = pd.read_csv(io.BytesIO(content), low_memory=False)
+        # --- START OF THE FIX ---
+        # Keep both the granular name ('OfficialName') and the parent region ('RegionName')
+        df = df[['Date', 'RegionName', 'OfficialName', 'AveragePrice', 'Index']].rename(columns={
+            'Date': 'date',
+            'RegionName': 'parent_region',
+            'OfficialName': 'region_name', # This is what appears in the dropdown
+            'AveragePrice': 'average_price',
+            'Index': 'index'
+        })
+        # --- END OF THE FIX ---
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df.dropna(subset=['date', 'parent_region', 'region_name', 'average_price', 'index'], inplace=True)
+        df['year'] = df['date'].dt.year
+        log.info("House price data cleaned.")
+        return df
+    except Exception as e:
+        log.error(f"Failed to clean house price data: {e}")
+        return None
 
 def clean_salary_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw salary Excel content."""
     if content is None: return None
     log.info("Cleaning salary data from Excel file...")
     try:
-        excel_bytes = io.BytesIO(content)
-        excel_file = pd.ExcelFile(excel_bytes)
-
+        excel_file = pd.ExcelFile(io.BytesIO(content))
         if not excel_file.sheet_names:
             log.error("No sheets found in the salary Excel file.")
             return None
-
-        # Prefer a sheet explicitly named "All" (case insensitive)
-        sheet_used = next(
-            (name for name in excel_file.sheet_names if name.strip().lower() == "all"),
-            None,
-        )
-
-        if sheet_used is None:
-            # Fall back to the sheet with the most non-empty preview rows
-            sheet_used = excel_file.sheet_names[0]
-            max_rows = -1
-            for sheet_name in excel_file.sheet_names:
-                preview = excel_file.parse(sheet_name, header=None, nrows=200)
-                non_empty = preview.dropna(how="all").shape[0]
-                if non_empty > max_rows:
-                    max_rows = non_empty
-                    sheet_used = sheet_name
-
-        log.info(f"Identified '{sheet_used}' as the salary data sheet.")
-
-        raw_sheet = excel_file.parse(sheet_used, header=None)
-        raw_sheet.dropna(how="all", inplace=True)
-
-        header_index = None
-        for idx, value in raw_sheet.iloc[:, 0].astype(str).items():
-            if value.strip().lower() == "region":
-                header_index = idx
-                break
-
-        if header_index is None:
-            log.warning(
-                "Could not locate a 'Region' header in sheet '%s'; defaulting to first row.",
-                sheet_used,
-            )
-            header_index = raw_sheet.index.min()
-
-        header_row = raw_sheet.loc[header_index].astype(str)
-        df = raw_sheet.loc[header_index + 1 :].copy()
-        df.columns = header_row
-        df.dropna(how="all", inplace=True)
-
-        region_col = next(
-            (col for col in df.columns if str(col).strip().lower() == "region"),
-            None,
-        )
-        if region_col is None:
-            log.error("Region column not found in salary data sheet '%s'.", sheet_used)
-            return None
-
-        pay_col = next(
-            (col for col in df.columns if str(col).strip() == "2025"),
-            None,
-        )
-        if pay_col is None:
-            pay_col = next(
-                (col for col in df.columns if str(col).strip().startswith("20")),
-                None,
-            )
-        if pay_col is None and len(df.columns) > 1:
-            pay_col = df.columns[1]
-
-        if pay_col is None:
-            log.error("Unable to determine a salary column in sheet '%s'.", sheet_used)
-            return None
-
-        cleaned_df = df[[region_col, pay_col]].rename(
-            columns={region_col: "region_name", pay_col: "weekly_pay"}
-        )
-
-        cleaned_df.dropna(subset=["region_name", "weekly_pay"], inplace=True)
-        cleaned_df["year"] = 2025
-        cleaned_df["weekly_pay"] = pd.to_numeric(cleaned_df["weekly_pay"], errors="coerce")
-        cleaned_df.dropna(inplace=True)
-        cleaned_df["average_annual_salary"] = cleaned_df["weekly_pay"] * 52
-        region_mapping = {"East": "East of England"}
-        cleaned_df["region_name"] = cleaned_df["region_name"].replace(region_mapping)
+        data_sheet_name = max(excel_file.sheet_names, key=lambda name: len(excel_file.parse(name)))
+        log.info(f"Identified '{data_sheet_name}' as the data sheet.")
+        df = excel_file.parse(data_sheet_name, header=5)
+        
+        df = df.iloc[:, [0, 1]]
+        df.columns = ['region_name', 'weekly_pay']
+        df.dropna(subset=['region_name', 'weekly_pay'], inplace=True)
+        df['year'] = 2025 # Assuming salary data is for a single year
+        df['weekly_pay'] = pd.to_numeric(df['weekly_pay'], errors='coerce')
+        df.dropna(inplace=True)
+        df['average_annual_salary'] = df['weekly_pay'] * 52
+        region_mapping = {'East': 'East of England'}
+        df['region_name'] = df['region_name'].replace(region_mapping)
         log.info("Salary data cleaned successfully.")
-        return cleaned_df[["year", "region_name", "average_annual_salary"]]
+        return df[['year', 'region_name', 'average_annual_salary']]
     except Exception as e:
         log.error(f"A critical error occurred while cleaning salary data: {e}")
         return None
+
 
 def merge_and_transform_data(prices_df: pd.DataFrame, salaries_df: pd.DataFrame) -> pd.DataFrame | None:
     """Merges the two dataframes and calculates the affordability ratio."""
     if prices_df is None or salaries_df is None: return None
     log.info("Merging house price and salary data...")
-    merged_df = pd.merge(prices_df, salaries_df, on=['year', 'region_name'], how='left')
+    # --- START OF THE FIX ---
+    # Merge using the parent region from prices_df and region_name from salaries_df
+    merged_df = pd.merge(
+        prices_df,
+        salaries_df,
+        left_on=['year', 'parent_region'],
+        right_on=['year', 'region_name'],
+        how='left'
+    )
+    
+    # Propagate the annual salary to all months in a year for each region
+    # This fills the NaN values for months where there wasn't a direct match
+    merged_df.sort_values(by=['region_name_x', 'date'], inplace=True)
+    merged_df['average_annual_salary'] = merged_df.groupby('region_name_x')['average_annual_salary'].transform(lambda x: x.ffill().bfill())
+    # --- END OF THE FIX ---
+    
     merged_df['affordability_ratio'] = merged_df['average_price'] / merged_df['average_annual_salary']
+    # Clean up columns before validation
+    merged_df.rename(columns={'region_name_x': 'region_name'}, inplace=True)
     log.info("Data merged and affordability ratio calculated.")
     return merged_df
 
 def validate_data(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None: return None
+    if df is None: return pd.DataFrame()
     log.info("Validating final merged data...")
     validated_rows = []
     error_count = 0
     for _, row in df.iterrows():
         try:
-            validated_rows.append(AffordabilityModel(**row.to_dict()).model_dump())
+            # Pydantic model doesn't know about 'parent_region', so select columns
+            model_data = row.to_dict()
+            relevant_data = {key: model_data.get(key) for key in AffordabilityModel.model_fields.keys()}
+            validated_rows.append(AffordabilityModel(**relevant_data).model_dump())
         except ValidationError:
             error_count += 1
     
@@ -202,13 +166,16 @@ def validate_data(df: pd.DataFrame) -> pd.DataFrame:
     else:
         log.info("Validation successful. All rows are valid.")
     
+    if not validated_rows:
+        return pd.DataFrame()
+        
     final_cols = list(AffordabilityModel.model_fields.keys())
     return pd.DataFrame(validated_rows)[final_cols]
 
 
 def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str):
     if df is None or df.empty or not db_url:
-        log.warning("Data loading skipped.")
+        log.warning("Data loading skipped: No data to load.")
         return
     log.info(f"Loading {len(df)} rows into table '{table_name}'...")
     try:
@@ -224,27 +191,19 @@ async def main():
         log.critical("FATAL: DATABASE_URL not set. Aborting.")
         return
 
-    is_test_mode = bool(os.environ.get("PYTEST_CURRENT_TEST")) or (
-        isinstance(DATABASE_URL, str) and "test_api_database" in DATABASE_URL
-    )
+    # Try to fetch live data
+    async with httpx.AsyncClient() as session:
+        hpi_task = fetch_data(session, HPI_DATA_URL, "house price")
+        salary_task = fetch_data(session, SALARY_DATA_URL, "salary")
+        raw_hpi_content, raw_salary_content = await asyncio.gather(hpi_task, salary_task)
 
-    if is_test_mode:
-        log.info("Test mode detected: using fallback datasets.")
+    cleaned_hpi_df = clean_house_price_data(raw_hpi_content)
+    if cleaned_hpi_df is None or cleaned_hpi_df.empty:
         cleaned_hpi_df = fallback_house_price_data()
+
+    cleaned_salary_df = clean_salary_data(raw_salary_content)
+    if cleaned_salary_df is None or cleaned_salary_df.empty:
         cleaned_salary_df = fallback_salary_data()
-    else:
-        async with httpx.AsyncClient() as session:
-            hpi_task = fetch_data(session, HPI_DATA_URL, "house price")
-            salary_task = fetch_data(session, SALARY_DATA_URL, "salary")
-            raw_hpi_content, raw_salary_content = await asyncio.gather(hpi_task, salary_task)
-
-        cleaned_hpi_df = clean_house_price_data(raw_hpi_content)
-        if cleaned_hpi_df is None or cleaned_hpi_df.empty:
-            cleaned_hpi_df = fallback_house_price_data()
-
-        cleaned_salary_df = clean_salary_data(raw_salary_content)
-        if cleaned_salary_df is None or cleaned_salary_df.empty:
-            cleaned_salary_df = fallback_salary_data()
 
     merged_df = merge_and_transform_data(cleaned_hpi_df, cleaned_salary_df)
     
