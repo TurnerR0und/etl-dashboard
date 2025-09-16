@@ -53,6 +53,23 @@ except Exception as e:
     redis_client = None
     CACHE_ENABLED = False
 
+# --- FastAPI Application ---
+app = FastAPI(
+    title="UK House Price Index API",
+    description="An API to serve cleaned UK house price data and the frontend dashboard.",
+    version="2.0.0",
+)
+
+# --- CORS Middleware ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+
 # --- Database Initialization ---
 def initialize_database():
     """
@@ -76,22 +93,6 @@ def initialize_database():
 def startup_db_init():
     """Initializes the database on application startup."""
     initialize_database()
-
-# --- FastAPI Application ---
-app = FastAPI(
-    title="UK House Price Index API",
-    description="An API to serve cleaned UK house price data and the frontend dashboard.",
-    version="2.0.0",
-)
-
-# --- CORS Middleware ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["GET"],
-    allow_headers=["*"],
-)
 
 # --- Helper Function ---
 def db_connection():
