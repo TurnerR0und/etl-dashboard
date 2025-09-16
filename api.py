@@ -5,7 +5,8 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
+from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
 import redis
 from logger_config import log 
@@ -113,6 +114,42 @@ def db_connection():
         log.error(f"Error creating database engine: {e}")
         return None
 
+
+def _table_exists(engine) -> bool:
+    """Checks whether the expected data table exists."""
+    try:
+        return inspect(engine).has_table(TABLE_NAME)
+    except SQLAlchemyError as exc:
+        log.error(f"Error inspecting database schema: {exc}")
+        return False
+
+
+def _get_engine_with_table():
+    """Ensures the target table exists, attempting to run the ETL if missing."""
+    engine = db_connection()
+    if not engine:
+        return None
+
+    if _table_exists(engine):
+        return engine
+
+    log.warning(f"Table '{TABLE_NAME}' not found. Attempting to run ETL pipeline.")
+    initialize_database()
+
+    # Dispose the old engine so new connections pick up any newly created table
+    try:
+        engine.dispose()
+    except Exception:
+        pass
+
+    engine = db_connection()
+    if engine and _table_exists(engine):
+        log.info(f"Table '{TABLE_NAME}' created successfully after ETL run.")
+        return engine
+
+    log.error(f"Table '{TABLE_NAME}' is still missing after ETL attempt.")
+    return None
+
 # --- API Endpoints ---
 @app.get("/", response_class=FileResponse)
 async def read_index():
@@ -137,13 +174,18 @@ def get_regions():
             return json.loads(cached_regions)
 
     log.info("CACHE MISS: Fetching regions from database.")
-    # ... (the rest of the function is the same, but the caching part changes)
-    engine = db_connection()
+    engine = _get_engine_with_table()
     if not engine:
-        return {"error": "Database connection failed"}
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Data is not available yet. Please try again shortly.")
     with engine.connect() as conn:
         query = text(f"SELECT DISTINCT region_name FROM {TABLE_NAME} ORDER BY region_name")
-        result = conn.execute(query)
+        try:
+            result = conn.execute(query)
+        except SQLAlchemyError as exc:
+            log.error(f"Error querying regions: {exc}")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Unable to fetch data at this time.")
         regions = [row[0] for row in result]
         
         response_data = {"regions": regions}
@@ -167,9 +209,10 @@ def get_data_for_region(region_name: str):
 
     log.info(f"CACHE MISS: Fetching data for {region_name} from database.")
     
-    engine = db_connection()
+    engine = _get_engine_with_table()
     if not engine:
-        return {"error": "Database connection failed"}
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Data is not available yet. Please try again shortly.")
 
     # --- START OF THE FIX ---
     # Dynamically choose the date formatting function based on the database dialect
@@ -194,7 +237,12 @@ def get_data_for_region(region_name: str):
     # --- END OF THE FIX ---
 
     with engine.connect() as conn:
-        result = conn.execute(query, {"region": region_name})
+        try:
+            result = conn.execute(query, {"region": region_name})
+        except SQLAlchemyError as exc:
+            log.error(f"Error querying region '{region_name}': {exc}")
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="Unable to fetch data at this time.")
         data = [dict(row._mapping) for row in result]
         
         response_data = {"region": region_name, "data": data}
