@@ -69,20 +69,35 @@ async def fetch_data(session: httpx.AsyncClient, url: str, data_name: str) -> by
 
 def clean_house_price_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw house price CSV content."""
-    if content is None: return None
+    if content is None:
+        return None
     log.info("Cleaning house price data...")
     try:
         df = pd.read_csv(io.BytesIO(content), low_memory=False)
-        # --- START OF THE FIX ---
-        # Keep both the granular name ('OfficialName') and the parent region ('RegionName')
-        df = df[['Date', 'RegionName', 'OfficialName', 'AveragePrice', 'Index']].rename(columns={
+
+        required_cols = {'Date', 'RegionName', 'AveragePrice', 'Index'}
+        if not required_cols.issubset(df.columns):
+            missing = required_cols - set(df.columns)
+            log.error(f"House price data missing required columns: {missing}")
+            return None
+
+        granular_candidates = [
+            'OfficialName',
+            'TownName',
+            'DistrictName',
+            'RegionName',
+        ]
+        granular_col = next((col for col in granular_candidates if col in df.columns), 'RegionName')
+
+        df = df[['Date', 'RegionName', granular_col, 'AveragePrice', 'Index']].rename(columns={
             'Date': 'date',
             'RegionName': 'parent_region',
-            'OfficialName': 'region_name', # This is what appears in the dropdown
+            granular_col: 'region_name',
             'AveragePrice': 'average_price',
             'Index': 'index'
         })
-        # --- END OF THE FIX ---
+
+        df['region_name'].fillna(df['parent_region'], inplace=True)
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         df.dropna(subset=['date', 'parent_region', 'region_name', 'average_price', 'index'], inplace=True)
         df['year'] = df['date'].dt.year
@@ -123,27 +138,24 @@ def clean_salary_data(content: bytes) -> pd.DataFrame | None:
 
 def merge_and_transform_data(prices_df: pd.DataFrame, salaries_df: pd.DataFrame) -> pd.DataFrame | None:
     """Merges the two dataframes and calculates the affordability ratio."""
-    if prices_df is None or salaries_df is None: return None
+    if prices_df is None or salaries_df is None:
+        return None
     log.info("Merging house price and salary data...")
-    # --- START OF THE FIX ---
-    # Merge using the parent region from prices_df and region_name from salaries_df
+
     merged_df = pd.merge(
         prices_df,
         salaries_df,
         left_on=['year', 'parent_region'],
         right_on=['year', 'region_name'],
-        how='left'
+        how='left',
+        suffixes=('', '_salary')
     )
-    
-    # Propagate the annual salary to all months in a year for each region
-    # This fills the NaN values for months where there wasn't a direct match
-    merged_df.sort_values(by=['region_name_x', 'date'], inplace=True)
-    merged_df['average_annual_salary'] = merged_df.groupby('region_name_x')['average_annual_salary'].transform(lambda x: x.ffill().bfill())
-    # --- END OF THE FIX ---
-    
+
+    merged_df.sort_values(by=['region_name', 'date'], inplace=True)
+    merged_df['average_annual_salary'] = merged_df.groupby('parent_region')['average_annual_salary'].transform(lambda x: x.ffill().bfill())
+
     merged_df['affordability_ratio'] = merged_df['average_price'] / merged_df['average_annual_salary']
-    # Clean up columns before validation
-    merged_df.rename(columns={'region_name_x': 'region_name'}, inplace=True)
+    merged_df.drop(columns=['region_name_salary'], inplace=True, errors='ignore')
     log.info("Data merged and affordability ratio calculated.")
     return merged_df
 
