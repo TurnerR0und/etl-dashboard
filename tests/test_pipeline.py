@@ -3,6 +3,8 @@ import pytest
 import io
 from data_pipeline import clean_house_price_data, clean_salary_data
 
+pytest.importorskip("openpyxl")
+
 # --- Test Data Fixtures ---
 
 @pytest.fixture

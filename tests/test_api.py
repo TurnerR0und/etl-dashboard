@@ -4,6 +4,9 @@ import os
 from logger_config import log
 import pandas as pd
 import io
+from unittest.mock import patch
+
+pytest.importorskip("openpyxl")
 
 # --- Test Data Fixtures ---
 # These provide consistent, local data for our tests, removing the need for internet access.
@@ -38,7 +41,7 @@ def raw_salary_content() -> bytes:
 # --- The Main Test Client Fixture ---
 
 @pytest.fixture(scope="module")
-def client(mocker, raw_hpi_content, raw_salary_content) -> TestClient:
+def client(raw_hpi_content, raw_salary_content) -> TestClient:
     """
     Provides a TestClient for the API after mocking the data fetching process.
     This fixture ensures a clean, predictable test database is created for each test run.
@@ -52,26 +55,28 @@ def client(mocker, raw_hpi_content, raw_salary_content) -> TestClient:
             return raw_salary_content
         return None
         
-    mocker.patch('data_pipeline.fetch_data', new=mock_fetch_data)
-
-    # 2. Set up a temporary database for the tests.
     db_path = "./test_api_database.db"
-    if os.path.exists(db_path):
-        os.remove(db_path)
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
-    
-    # 3. Import the app and create the TestClient.
-    # The 'with' statement correctly triggers the app's startup event,
-    # which now runs our mocked data pipeline.
-    from api import app
-    
-    with TestClient(app) as c:
-        yield c
-        
-    # 4. Clean up the temporary database after tests are done.
+
+    # 2. Patch network access so tests remain fully offline.
+    with patch('data_pipeline.fetch_data', new=mock_fetch_data):
+        # 3. Set up a temporary database for the tests.
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
+
+        # 4. Import the app and create the TestClient.
+        # The 'with' statement correctly triggers the app's startup event,
+        # which now runs our mocked data pipeline.
+        from api import app
+
+        with TestClient(app) as c:
+            yield c
+
+    # 5. Clean up the temporary database after tests are done.
     log.info(f"Test teardown: Removing test database at {db_path}")
     if os.path.exists(db_path):
         os.remove(db_path)
+    os.environ.pop("DATABASE_URL", None)
 
 # --- API Endpoint Tests (These can remain exactly the same) ---
 
