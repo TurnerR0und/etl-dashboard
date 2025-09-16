@@ -59,7 +59,7 @@ async def fetch_data(session: httpx.AsyncClient, url: str, data_name: str) -> by
     """Fetches raw content (bytes) asynchronously from a URL."""
     log.info(f"Fetching {data_name} data from {url}...")
     try:
-        response = await session.get(url, timeout=60.0, follow_redirects=True)
+        response = await session.get(url, timeout=180.0, follow_redirects=True)
         response.raise_for_status()
         log.info(f"{data_name} data fetched successfully.")
         return response.content
