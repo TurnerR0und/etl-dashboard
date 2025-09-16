@@ -72,7 +72,10 @@ def initialize_database():
 
 
 # Run the initialization on startup
-# initialize_database()
+@app.on_event("startup")
+def startup_db_init():
+    """Initializes the database on application startup."""
+    initialize_database()
 
 # --- FastAPI Application ---
 app = FastAPI(

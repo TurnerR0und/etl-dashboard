@@ -12,3 +12,4 @@ redis
 httpx
 xlrd
 openpyxl
+pytest-mock

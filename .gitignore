@@ -96,3 +96,7 @@ Personal additions
 house_prices.db
 etl-env/
 .vscode/
+.pytest_cache
+__pycache__
+__pycache__/api.cpython-310.pyc
+__pycache__/api.cpython-310.pyc
