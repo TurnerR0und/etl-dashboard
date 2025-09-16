@@ -88,62 +88,94 @@ def clean_salary_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw salary Excel content."""
     if content is None: return None
     log.info("Cleaning salary data from Excel file...")
-    excel_bytes = io.BytesIO(content)
-    sheet_used = 'All'
-
-    # Read the excel file, being resilient to sheet name changes from the provider
     try:
-        df = pd.read_excel(excel_bytes, sheet_name=sheet_used, header=5)
-    except ValueError:
-        with pd.ExcelFile(io.BytesIO(content)) as workbook:
-            sheet_candidates = workbook.sheet_names
-            sheet_used = next(
-                (name for name in sheet_candidates if name.strip().lower() == 'all'),
-                sheet_candidates[0]
-            )
-            log.warning(
-                "Worksheet 'All' not found in salary workbook. Using '%s' instead.",
-                sheet_used
-            )
-            df = pd.read_excel(workbook, sheet_name=sheet_used, header=5)
+        excel_bytes = io.BytesIO(content)
+        excel_file = pd.ExcelFile(excel_bytes)
 
-    # Some releases shift the header row; detect and realign if needed
-    normalized_cols = [str(col).strip().lower() for col in df.columns]
-    if "region" not in normalized_cols:
-        raw_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_used, header=None)
-        header_index = next(
-            (idx for idx, value in enumerate(raw_df.iloc[:, 0].astype(str).str.strip().str.lower())
-             if value == 'region'),
-            None
+        if not excel_file.sheet_names:
+            log.error("No sheets found in the salary Excel file.")
+            return None
+
+        # Prefer a sheet explicitly named "All" (case insensitive)
+        sheet_used = next(
+            (name for name in excel_file.sheet_names if name.strip().lower() == "all"),
+            None,
         )
-        if header_index is not None:
-            header_row = raw_df.iloc[header_index]
-            df = raw_df.iloc[header_index + 1:].copy()
-            df.columns = header_row
-        else:
-            log.warning("Could not locate 'Region' header in salary workbook; using best-effort parsing.")
-    
-    # --- START OF THE FIX ---
-    # Select the first two columns by their position (iloc) instead of by name.
-    # This is much more robust to changes in column naming from the source.
-    df = df.iloc[:, [0, 1]]
-    
-    # Assign our own stable column names.
-    df.columns = ['region_name', 'weekly_pay']
-    # --- END OF THE FIX ---
-    
-    df.dropna(subset=['region_name', 'weekly_pay'], inplace=True)
 
-    df['year'] = 2025
-    df['weekly_pay'] = pd.to_numeric(df['weekly_pay'], errors='coerce')
-    df.dropna(inplace=True)
+        if sheet_used is None:
+            # Fall back to the sheet with the most non-empty preview rows
+            sheet_used = excel_file.sheet_names[0]
+            max_rows = -1
+            for sheet_name in excel_file.sheet_names:
+                preview = excel_file.parse(sheet_name, header=None, nrows=200)
+                non_empty = preview.dropna(how="all").shape[0]
+                if non_empty > max_rows:
+                    max_rows = non_empty
+                    sheet_used = sheet_name
 
-    df['average_annual_salary'] = df['weekly_pay'] * 52
-    
-    region_mapping = {'East': 'East of England'}
-    df['region_name'] = df['region_name'].replace(region_mapping)
-    log.info("Salary data cleaned.")
-    return df[['year', 'region_name', 'average_annual_salary']]
+        log.info(f"Identified '{sheet_used}' as the salary data sheet.")
+
+        raw_sheet = excel_file.parse(sheet_used, header=None)
+        raw_sheet.dropna(how="all", inplace=True)
+
+        header_index = None
+        for idx, value in raw_sheet.iloc[:, 0].astype(str).items():
+            if value.strip().lower() == "region":
+                header_index = idx
+                break
+
+        if header_index is None:
+            log.warning(
+                "Could not locate a 'Region' header in sheet '%s'; defaulting to first row.",
+                sheet_used,
+            )
+            header_index = raw_sheet.index.min()
+
+        header_row = raw_sheet.loc[header_index].astype(str)
+        df = raw_sheet.loc[header_index + 1 :].copy()
+        df.columns = header_row
+        df.dropna(how="all", inplace=True)
+
+        region_col = next(
+            (col for col in df.columns if str(col).strip().lower() == "region"),
+            None,
+        )
+        if region_col is None:
+            log.error("Region column not found in salary data sheet '%s'.", sheet_used)
+            return None
+
+        pay_col = next(
+            (col for col in df.columns if str(col).strip() == "2025"),
+            None,
+        )
+        if pay_col is None:
+            pay_col = next(
+                (col for col in df.columns if str(col).strip().startswith("20")),
+                None,
+            )
+        if pay_col is None and len(df.columns) > 1:
+            pay_col = df.columns[1]
+
+        if pay_col is None:
+            log.error("Unable to determine a salary column in sheet '%s'.", sheet_used)
+            return None
+
+        cleaned_df = df[[region_col, pay_col]].rename(
+            columns={region_col: "region_name", pay_col: "weekly_pay"}
+        )
+
+        cleaned_df.dropna(subset=["region_name", "weekly_pay"], inplace=True)
+        cleaned_df["year"] = 2025
+        cleaned_df["weekly_pay"] = pd.to_numeric(cleaned_df["weekly_pay"], errors="coerce")
+        cleaned_df.dropna(inplace=True)
+        cleaned_df["average_annual_salary"] = cleaned_df["weekly_pay"] * 52
+        region_mapping = {"East": "East of England"}
+        cleaned_df["region_name"] = cleaned_df["region_name"].replace(region_mapping)
+        log.info("Salary data cleaned successfully.")
+        return cleaned_df[["year", "region_name", "average_annual_salary"]]
+    except Exception as e:
+        log.error(f"A critical error occurred while cleaning salary data: {e}")
+        return None
 
 def merge_and_transform_data(prices_df: pd.DataFrame, salaries_df: pd.DataFrame) -> pd.DataFrame | None:
     """Merges the two dataframes and calculates the affordability ratio."""
