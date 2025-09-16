@@ -54,6 +54,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          passphrase: ${{ secrets.VPS_SSH_PASSPHRASE }} # <-- Add this line
           script: |
             # Clone the repo if it doesn't exist
             if [ ! -d "~/etl-dashboard" ]; then

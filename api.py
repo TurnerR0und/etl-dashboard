@@ -9,6 +9,8 @@ from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import redis
 from logger_config import log 
+from contextlib import asynccontextmanager
+
 #from cachetools import TTLCache # <-- Import TTLCache
 
 # Load environment variables from .env file for local development
@@ -54,10 +56,19 @@ except Exception as e:
     CACHE_ENABLED = False
 
 # --- FastAPI Application ---
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Code to run on startup
+    initialize_database()
+    yield
+    # Code to run on shutdown (if any)
+
 app = FastAPI(
     title="UK House Price Index API",
     description="An API to serve cleaned UK house price data and the frontend dashboard.",
     version="2.0.0",
+    lifespan=lifespan # Set the lifespan handler here
 )
 
 # --- CORS Middleware ---
@@ -87,12 +98,6 @@ def initialize_database():
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         log.critical(f"FATAL: Error running ETL pipeline: {e}")
 
-
-# Run the initialization on startup
-@app.on_event("startup")
-def startup_db_init():
-    """Initializes the database on application startup."""
-    initialize_database()
 
 # --- Helper Function ---
 def db_connection():
