@@ -88,8 +88,40 @@ def clean_salary_data(content: bytes) -> pd.DataFrame | None:
     """Cleans and transforms the raw salary Excel content."""
     if content is None: return None
     log.info("Cleaning salary data from Excel file...")
-    # Read the excel file, skipping the messy header
-    df = pd.read_excel(io.BytesIO(content), sheet_name='All', header=5)
+    excel_bytes = io.BytesIO(content)
+    sheet_used = 'All'
+
+    # Read the excel file, being resilient to sheet name changes from the provider
+    try:
+        df = pd.read_excel(excel_bytes, sheet_name=sheet_used, header=5)
+    except ValueError:
+        with pd.ExcelFile(io.BytesIO(content)) as workbook:
+            sheet_candidates = workbook.sheet_names
+            sheet_used = next(
+                (name for name in sheet_candidates if name.strip().lower() == 'all'),
+                sheet_candidates[0]
+            )
+            log.warning(
+                "Worksheet 'All' not found in salary workbook. Using '%s' instead.",
+                sheet_used
+            )
+            df = pd.read_excel(workbook, sheet_name=sheet_used, header=5)
+
+    # Some releases shift the header row; detect and realign if needed
+    normalized_cols = [str(col).strip().lower() for col in df.columns]
+    if "region" not in normalized_cols:
+        raw_df = pd.read_excel(io.BytesIO(content), sheet_name=sheet_used, header=None)
+        header_index = next(
+            (idx for idx, value in enumerate(raw_df.iloc[:, 0].astype(str).str.strip().str.lower())
+             if value == 'region'),
+            None
+        )
+        if header_index is not None:
+            header_row = raw_df.iloc[header_index]
+            df = raw_df.iloc[header_index + 1:].copy()
+            df.columns = header_row
+        else:
+            log.warning("Could not locate 'Region' header in salary workbook; using best-effort parsing.")
     
     # --- START OF THE FIX ---
     # Select the first two columns by their position (iloc) instead of by name.
