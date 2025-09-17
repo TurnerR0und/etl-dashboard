@@ -258,6 +258,18 @@ def merge_and_transform_data(prices_df: pd.DataFrame, salaries_df: pd.DataFrame)
         "average_annual_salary"
     ].transform(lambda x: x.ffill().bfill())
 
+    if merged_df["average_annual_salary"].isna().any():
+        year_means = (
+            salaries_df.groupby("year")["average_annual_salary"].mean().to_dict()
+        )
+        merged_df.loc[merged_df["average_annual_salary"].isna(), "average_annual_salary"] = merged_df.loc[
+            merged_df["average_annual_salary"].isna(), "year"
+        ].map(year_means)
+
+    if merged_df["average_annual_salary"].isna().any():
+        fallback_salary = float(salaries_df["average_annual_salary"].median())
+        merged_df["average_annual_salary"].fillna(fallback_salary, inplace=True)
+
     merged_df.drop(columns=["region_name_salary"], inplace=True, errors="ignore")
 
     merged_df["affordability_ratio"] = merged_df["average_price"] / merged_df["average_annual_salary"]
