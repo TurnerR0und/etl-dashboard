@@ -83,10 +83,15 @@ def test_get_data_for_region_successful(client: TestClient):
     assert len(data["data"]) > 0
     first_item = data["data"][0]
     assert first_item["average_annual_salary"] == 52000
-    assert first_item["affordability_ratio"] == (500000 / 52000)
+    # Use pytest.approx to robustly compare floating-point numbers
+    assert first_item["affordability_ratio"] == pytest.approx(500000 / 52000)
 
 def test_get_data_for_nonexistent_region(client: TestClient):
     response = client.get("/data/Atlantis")
     assert response.status_code == 200
+    # --- START OF THE FIX ---
+    # Define 'data' within this test's scope
     data = response.json()
+    # --- END OF THE FIX ---
+    assert data["region"] == "Atlantis"
     assert data["data"] == []

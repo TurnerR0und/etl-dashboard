@@ -14,8 +14,12 @@ load_dotenv()
 
 HPI_DATA_URL = "https://publicdata.landregistry.gov.uk/market-trend-data/house-price-index-data/UK-HPI-full-file-2025-06.csv?utm_medium=GOV.UK&utm_source=datadownload&utm_campaign=full_fil&utm_term=9.30_20_08_25"
 SALARY_DATA_URL = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/grossweeklyearningsoffulltimeemployeesbyregionearn05/current/earn05aug2025.xls"
-DATABASE_URL = os.environ.get("DATABASE_URL")
 TABLE_NAME = "uk_hpi_plus_affordability"
+
+
+def get_database_url() -> str | None:
+    """Return the database URL from the current environment."""
+    return os.environ.get("DATABASE_URL")
 
 
 class AffordabilityModel(BaseModel):
@@ -301,7 +305,8 @@ def load_data_to_db(df: pd.DataFrame, db_url: str, table_name: str) -> None:
 
 
 async def main() -> None:
-    if not DATABASE_URL:
+    database_url = get_database_url()
+    if not database_url:
         log.critical("FATAL: DATABASE_URL not set. Aborting.")
         return
 
@@ -320,7 +325,7 @@ async def main() -> None:
 
     merged_df = merge_and_transform_data(cleaned_hpi_df, cleaned_salary_df)
     validated_df = validate_data(merged_df)
-    load_data_to_db(validated_df, DATABASE_URL, TABLE_NAME)
+    load_data_to_db(validated_df, database_url, TABLE_NAME)
 
 
 if __name__ == "__main__":

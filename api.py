@@ -1,6 +1,4 @@
 import os
-import subprocess
-
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -14,12 +12,16 @@ from logger_config import log
 
 load_dotenv()
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
 TABLE_NAME = "uk_hpi_plus_affordability"
+
+
+def get_database_url() -> str | None:
+    """Read the database URL from the current environment."""
+    return os.environ.get("DATABASE_URL")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    initialize_database()
+    await initialize_database()
     yield
 
 
@@ -39,24 +41,30 @@ app.add_middleware(
 )
 
 
-def initialize_database() -> None:
-    if not DATABASE_URL:
+async def initialize_database() -> None:
+    database_url = get_database_url()
+    if not database_url:
         log.critical("FATAL: DATABASE_URL not set. Cannot initialize database.")
         return
 
     log.info("Running ETL pipeline to create/update database...")
     try:
-        subprocess.run(["python3", "data_pipeline.py"], check=True)
+        from data_pipeline import main as run_pipeline
+    except Exception as exc:  # pragma: no cover - import errors are logged and surfaced
+        log.critical(f"FATAL: Unable to import data pipeline: {exc}")
+        return
+
+    try:
+        await run_pipeline()
         log.info("ETL pipeline completed successfully.")
-    except subprocess.CalledProcessError as exc:
+    except Exception as exc:
         log.critical(f"FATAL: Error running ETL pipeline: {exc}")
-    except FileNotFoundError as exc:
-        log.critical(f"FATAL: Unable to execute data pipeline: {exc}")
 def db_connection():
-    if not DATABASE_URL:
+    database_url = get_database_url()
+    if not database_url:
         return None
     try:
-        return create_engine(DATABASE_URL)
+        return create_engine(database_url)
     except Exception as exc:
         log.error(f"Error creating database engine: {exc}")
         return None
