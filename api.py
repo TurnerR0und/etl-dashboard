@@ -128,7 +128,14 @@ async def get_data_for_region(region_name: str):
     try:
         with engine.connect() as conn:
             result = conn.execute(query, {"region": region_name})
-            data = [dict(row._mapping) for row in result]
+            data = []
+            for row in result:
+                record = dict(row._mapping)
+                price = record.get("average_price")
+                salary = record.get("average_annual_salary")
+                if price is not None and salary not in (None, 0):
+                    record["affordability_ratio"] = price / salary
+                data.append(record)
     except SQLAlchemyError as exc:
         log.error(f"Error querying region '{region_name}': {exc}")
         raise HTTPException(status_code=503, detail="Unable to fetch data at this time")
