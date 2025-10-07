@@ -1,39 +1,38 @@
 ---
-title: Python ETL + Dashboard Demo
+title: Python ETL & Dashboard Demo
 emoji: 🇬🇧🏡
 colorFrom: blue
 colorTo: green
 sdk: docker
-sdk_version: "1.0.0"
 app_file: api.py
 pinned: false
 ---
 
-# Python ETL + Dashboard Demo
+# Python ETL & Dashboard Demo
 
-End‑to‑end demo that fetches UK House Price Index data, cleans and validates it, loads it into PostgreSQL, serves it via a FastAPI backend, and visualizes it in a browser dashboard. The repo includes automated tests and CI/CD that deploys to Hugging Face Spaces (Docker runtime).
+End-to-end demo that fetches UK House Price Index and ONS salary data, cleans and validates it, calculates affordability metrics, loads it into PostgreSQL, serves it via a FastAPI backend, and visualizes it in a browser dashboard. The repo includes automated tests and a CI/CD pipeline that deploys to a VPS using Docker.
 
 ## 🚀 Features
 
-- **ETL Pipeline**: `pandas` + `requests` pipeline that downloads the official UK HPI CSV, selects/renames columns, coerces dates, drops invalid rows, and validates rows with `pydantic` before loading to the database.
+- **ETL Pipeline**: Asynchronous `httpx` + `pandas` pipeline that downloads the official UK HPI CSV and ONS weekly salary Excel files.
+- **Data Cleaning & Transformation**: Selects/renames columns, coerces dates, drops invalid rows, merges the two datasets, and calculates a house price-to-salary affordability ratio.
+- **Data Validation**: Uses `pydantic` to validate the final data model before loading to the database.
 - **PostgreSQL Storage**: Data is written to a PostgreSQL table via SQLAlchemy using `DATABASE_URL`.
-- **FastAPI Backend**: Two endpoints: `/regions` (distinct region list) and `/data/{region}` (time series). Uses SQL for efficient retrieval.
-- **Response Caching**: In‑memory TTL caches (via `cachetools.TTLCache`) for regions and per‑region results to reduce DB round‑trips in the Space container.
+- **FastAPI Backend**: Two endpoints: `/regions` (distinct region list) and `/data/{region}` (time series including price, index, salary, and affordability). Uses SQL for efficient retrieval.
 - **Interactive Dashboard**: Single page `index.html` (Tailwind CSS + Chart.js) that calls the API and renders charts.
-- **Testing with Pytest**: Unit tests for the data cleaning behavior (`tests/test_pipeline.py`).
-- **CI/CD**: GitHub Actions runs tests, then deploys to a Hugging Face Space via a protected push from `main`.
-- **Dockerized**: The Space uses the `Dockerfile` to build and run `uvicorn` with `api.py`.
+- **Testing with Pytest**: Unit and integration tests for the data pipeline (`test_pipeline.py`) and the API endpoints (`test_api.py`).
+- **CI/CD**: GitHub Actions runs tests, builds a Docker image, pushes it to Docker Hub, and deploys to a VPS via SSH.
+- **Dockerized**: The application is containerized using a `Dockerfile` to build and run `uvicorn` with `api.py`.
 
 ---
 
 ## 🧰 Tech Stack
 
-- Python 3.10, pandas, requests, SQLAlchemy, pydantic
+- Python 3.10, pandas, httpx, SQLAlchemy, pydantic
 - FastAPI, Uvicorn
-- cachetools (TTL caches for responses)
 - Pytest for tests
-- GitHub Actions for CI/CD
-- Docker runtime on Hugging Face Spaces
+- GitHub Actions for CI/CD, Docker Hub for image registry
+- Docker for containerization
 
 ---
 
@@ -50,10 +49,12 @@ pip install -r requirements.txt
 
 2) Configure environment
 
-Create a `.env` file with your PostgreSQL URL:
+Create a `.env` file. The only required variable for local execution is your PostgreSQL URL. Other variables used in the deployment pipeline can also be added.
 
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/dbname
+REDIS_URL=redis://localhost:6379
+API_SECRET_TOKEN=your-secret-token
 ```
 
 3) Run the ETL
